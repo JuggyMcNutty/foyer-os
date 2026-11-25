@@ -8,8 +8,9 @@ updated every session**; future sessions start here.
 
 A reproducible living-room appliance:
 
-- **Base:** Alpine 3.24 (musl, OpenRC) today. A Debian (glibc, systemd) base is
-  planned for the 4K board (see PLAN.md, Phase E).
+- **Base:** Alpine 3.24 (musl, OpenRC) on the current box, or Debian trixie
+  (glibc, systemd), chosen by the `BASE=` field of the profile. Debian is
+  intended for the 4K board: glibc apps and Widevine-capable browsers.
 - **Compositor:** gamescope. If gamescope can't start (e.g. no DRM-capable
   Vulkan), the session falls back to Foyer on KMS.
 - **Audio:** PipeWire, pipewire-pulse and WirePlumber, started inside the
@@ -49,7 +50,10 @@ box: ideapad 120S board, N3350, 2 GB RAM, 32 GB eMMC, HDMI 1.4 to a 4K TV).
 | Provision a box | `scripts/provision.sh ideapad-120s htpc` (only APKs; no on-box compiling) |
 | Disk image | `scripts/make-image.sh <profile> --ssh-key ~/.ssh/id_ed25519.pub` |
 | QEMU boot test | `FOYER_EXPECT_UI=1 scripts/boot-test.sh out/foyer-os-qemu-*.img {bios,uefi}` |
-| Release | push a `v*` tag → GitHub Actions builds APKs + images, boot-tests, attaches to the release |
+| .debs (trixie) | `scripts/build-debs.sh` → `out/debs/trixie/` |
+| Portable glibc Foyer | `scripts/build-portable.sh` → `out/foyer-<ver>-x86_64-glibc.tar.zst` (bookworm-built, glibc ≤ 2.36) |
+| Debian image | `scripts/make-image-debian.sh qemu-debian\|generic-x86_64-debian --ssh-key …` |
+| Release | push a `v*` tag → CI builds APKs, .debs, the tarball and images (alpine + debian), boot-tests both, attaches everything + SHA256SUMS |
 
 ## Current state
 
@@ -73,8 +77,15 @@ box: ideapad 120S board, N3350, 2 GB RAM, 32 GB eMMC, HDMI 1.4 to a 4K TV).
   sound.
 - [ ] Prime Video DRM (no Widevine on Alpine; the Debian base may fix it).
 - [ ] IPTV playlist is still a placeholder.
-- [ ] Phase E: Debian/glibc base, `.deb`s, systemd session, NetworkManager
-  backend.
+- [x] Phase E (Debian/glibc):
+  - rootless Debian sandbox (`debian-env.sh`) and `.deb`s for foyer,
+    foyer-session, foyer-update and foyer-jellyfin-desktop;
+  - systemd unit `foyer-session.service` plus OpenRC/systemd `foyer-ctl`
+    backends and NetworkManager WiFi;
+  - `make-image-debian.sh`. The QEMU boot passes under BIOS and UEFI;
+  - `provision.sh` works against stock trixie (tested on a VM).
+- [ ] Red on Debian: needs Qt ≥ 6.11, but trixie has 6.8. YouTube on Debian
+  uses the Chromium `youtube.com/tv` fallback in `foyer-app`.
 - [ ] Apps run as root (sandbox disabled). Move them to an unprivileged user.
 - [ ] CEC: no adapter (HD 500 has no CEC). Revisit with a Pulse-Eight USB
   adapter.
@@ -101,6 +112,10 @@ box: ideapad 120S board, N3350, 2 GB RAM, 32 GB eMMC, HDMI 1.4 to a 4K TV).
     flags, and `make-image.sh` restores owners with `debugfs`.
   - Images need `CAP_SYS_CHROOT` inside the namespace (for apk scripts),
     which `alpine-env.sh` grants.
+  - Debian: debootstrap runs in two stages, with a tar `--no-same-owner`
+    shim plus the `nochown.so` preload (unmappable chown → success).
+    Debian's gamescope is in trixie-backports and installs to `/usr/games`;
+    the cloud kernel lacks virtio-gpu DRM.
 - **Dev machine** (Arch distrobox)
   - Don't upgrade openssl.
   - **Never exec on the host** without the user's approval.
@@ -127,6 +142,10 @@ box: ideapad 120S board, N3350, 2 GB RAM, 32 GB eMMC, HDMI 1.4 to a 4K TV).
   - evdev now hotplugs.
   - Foyer hung on a stale PipeWire.
   - session.sh was shadowed by an `.apk-new` copy, so it moved to `/usr/lib`.
+
+- Phase E: Debian trixie base done end to end (sandbox, .debs, systemd
+  session, image, QEMU boot, provisioning a stock trixie VM). There is now a
+  portable glibc tarball, and the CI matrix covers alpine/debian × profiles.
 
 (Earlier sessions: v1/v2 history is in `plans/big-launcher-frontend.md` and git
 history before `bfccda5`.)

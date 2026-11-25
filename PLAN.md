@@ -349,7 +349,7 @@ Phase E
       `ovmf` inside the sandbox (TCG, no KVM needed)
 - [x] **D5** GitHub Actions release workflow (foyer-os) + CI (foyer); `foyer-update` pulls from releases
 - [x] **D6** docs: AGENTS.md, hardwarefacts.md, foyer README/FORK.md, foyer-os README
-- [ ] **E1** `debian-env.sh` (rootless mmdebstrap bookworm/trixie in bwrap); foyer CI on bookworm
+- [x] **E1** `debian-env.sh` (rootless mmdebstrap bookworm/trixie in bwrap); foyer CI on bookworm
       green; `FOYER_BUNDLE_SDL` portable tarball
 - [x] **E2** `debian/` packaging for foyer, foyer-session, foyer-update, foyer-red,
       foyer-jellyfin-desktop; `build-debs.sh`
