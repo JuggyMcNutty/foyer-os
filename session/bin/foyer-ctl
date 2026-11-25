@@ -1,0 +1,263 @@
+#!/bin/sh
+# foyer-ctl — single system-control backend for the Foyer launcher (formerly
+# htpc-ctl/htpc-net; compat symlinks are installed). Line-oriented, TAB-separated output. Runs as root in the
+# session. Always invoked through the launcher's job queue (never synchronous).
+#
+# Groups:
+#   audio   volume/get volume/set N volume/up volume/down mute/toggle sinks sink/set NAME
+#   display mode/get mode/set WxH@R
+#   wifi    status scan connect SSID PSK
+#   bt      status devices scan pair MAC power on|off
+#   net     status
+#   sys     info timezone/cycle ntp/sync upgrade
+#   power   shutdown reboot suspend
+
+# Config dir: /etc/foyer (legacy /etc/htpc honoured until re-provisioned)
+FOYER_CONF=${FOYER_CONF:-/etc/foyer}
+[ -d "$FOYER_CONF" ] || FOYER_CONF=/etc/htpc
+SESSION_CONF="$FOYER_CONF/session.conf"
+
+WIFI_IF=""
+for iface in /sys/class/net/*; do
+    case "$(basename "$iface")" in
+        wl*|wlan*) WIFI_IF=$(basename "$iface"); break ;;
+    esac
+done
+
+esc_wpa() {
+    printf '"%s"' "$(printf '%s' "$1" | sed 's/"/\\"/g')"
+}
+
+GROUP="$1"; CMD="$2"
+[ $# -ge 2 ] && shift 2 || shift $#
+# From here on, command arguments are $1, $2, ...
+
+case "$GROUP:$CMD" in
+# ---- audio -------------------------------------------------------------
+audio:volume/get)
+    VOL=$(wpctl get-volume @DEFAULT_SINK@ 2>/dev/null | grep -oE '[0-9.]+' | head -1)
+    [ -z "$VOL" ] && VOL=0
+    VOLINT=$(printf '%.0f' "$VOL")
+    MUTE=$(wpctl get-volume -l @DEFAULT_SINK@ 2>/dev/null | grep -oE 'MUTED' | head -1)
+    [ -n "$MUTE" ] && MUTE=1 || MUTE=0
+    echo "volume=$VOLINT"
+    echo "muted=$MUTE"
+    ;;
+audio:volume/set)
+    wpctl set-volume @DEFAULT_SINK@ "$1%" 2>/dev/null
+    ;;
+audio:volume/up)
+    wpctl set-volume @DEFAULT_SINK@ 5%+ 2>/dev/null
+    ;;
+audio:volume/down)
+    wpctl set-volume @DEFAULT_SINK@ 5%- 2>/dev/null
+    ;;
+audio:mute/toggle)
+    wpctl set-mute @DEFAULT_SINK@ toggle 2>/dev/null
+    ;;
+audio:sinks)
+    # id<TAB>name<TAB>1/0(default)
+    wpctl list audio sinks 2>/dev/null | awk -F'\t' '
+        { id=$1; name=$2; isdef=0; if ($4=="*") isdef=1;
+          sub(/^alsa_output\./,"",name); sub(/^alsa_input\./,"",name);
+          printf "%s\t%s\t%s\n", id, name, isdef }
+    '
+    ;;
+audio:sink/set)
+    # Set default sink by id or name
+    ID=$(wpctl list audio sinks 2>/dev/null | awk -F'\t' -v want="$1" '
+        { id=$1; name=$2; sub(/^alsa_output\./,"",name); sub(/^alsa_input\./,"",name);
+          if (id==want || name==want) { print id; exit } }
+    ')
+    [ -n "$ID" ] && wpctl set-default "$ID" 2>/dev/null
+    ;;
+# ---- display -----------------------------------------------------------
+display:mode/get)
+    # Current gamescope output mode from session.conf (WIDTH=/HEIGHT=/RATE=)
+    if [ -r "$SESSION_CONF" ]; then
+        W=$(sed -n 's/^WIDTH=//p' "$SESSION_CONF" | head -1)
+        H=$(sed -n 's/^HEIGHT=//p' "$SESSION_CONF" | head -1)
+        R=$(sed -n 's/^RATE=//p' "$SESSION_CONF" | head -1)
+    fi
+    if [ -n "$W" ] && [ -n "$H" ]; then echo "${W}x${H}@${R:-60}"; else echo "auto"; fi
+    ;;
+display:mode/set)
+    # Rewrite WIDTH/HEIGHT/RATE in session.conf and restart the session
+    M="$1"
+    W=$(echo "$M" | cut -dx -f1)
+    H=$(echo "$M" | cut -dx -f2 | cut -d@ -f1)
+    R=$(echo "$M" | cut -s -d@ -f2); [ -n "$R" ] || R=60
+    case "$W$H$R" in
+        *[!0-9]*|"") echo "FAIL bad mode '$M'"; exit 1 ;;
+    esac
+    if [ -f "$SESSION_CONF" ]; then
+        cp "$SESSION_CONF" "$SESSION_CONF.prev"
+        for kv in "WIDTH=$W" "HEIGHT=$H" "RATE=$R"; do
+            k=${kv%%=*}
+            if grep -q "^$k=" "$SESSION_CONF"; then sed -i "s/^$k=.*/$kv/" "$SESSION_CONF"
+            else echo "$kv" >> "$SESSION_CONF"; fi
+        done
+        echo "OK"
+        # Restart the session: init respawns session.sh. gamescope ignores
+        # SIGTERM, so SIGKILL it (after replying).
+        ( sleep 1; pkill -9 -f gamescope-wl 2>/dev/null || pkill -9 -x gamescope 2>/dev/null ) >/dev/null 2>&1 &
+    else
+        echo "FAIL no session.conf"; exit 1
+    fi
+    ;;
+# ---- wifi --------------------------------------------------------------
+wifi:status)
+    if [ -z "$WIFI_IF" ]; then echo "state=none"; exit 0; fi
+    ST=$(wpa_cli -i "$WIFI_IF" status 2>/dev/null)
+    WSTATE=$(echo "$ST" | grep '^wpa_state=' | cut -d= -f2)
+    SSID=$(echo "$ST"  | grep '^ssid='     | cut -d= -f2)
+    [ -z "$WSTATE" ] && WSTATE=disconnected
+    echo "state=$WSTATE"
+    echo "ssid=$SSID"
+    ;;
+wifi:scan)
+    [ -z "$WIFI_IF" ] && exit 0
+    wpa_cli -i "$WIFI_IF" scan >/dev/null 2>&1
+    sleep 2
+    TAB=$(printf '\t')
+    wpa_cli -i "$WIFI_IF" scan_results 2>/dev/null | tail -n +2 |
+    while IFS="$TAB" read -r bssid freq signal flags ssid; do
+        [ -z "$ssid" ] && continue
+        printf '%s\t%s\n' "$ssid" "$signal"
+    done | sort -t"$TAB" -k2,2nr | awk -F"$TAB" '!seen[$1]++'
+    ;;
+wifi:connect)
+    [ -z "$WIFI_IF" ] && { echo "FAIL no adapter"; exit 1; }
+    SSID="$1"; PSK="$2"
+    ID=$(wpa_cli -i "$WIFI_IF" add_network 2>/dev/null | tail -1)
+    [ -z "$ID" ] && { echo "FAIL wpa_cli"; exit 1; }
+    wpa_cli -i "$WIFI_IF" set_network "$ID" ssid "$(esc_wpa "$SSID")" >/dev/null
+    if [ -n "$PSK" ]; then
+        wpa_cli -i "$WIFI_IF" set_network "$ID" psk "$(esc_wpa "$PSK")" >/dev/null
+    else
+        wpa_cli -i "$WIFI_IF" set_network "$ID" key_mgmt NONE >/dev/null
+    fi
+    wpa_cli -i "$WIFI_IF" enable_network "$ID" >/dev/null
+    wpa_cli -i "$WIFI_IF" save_config >/dev/null 2>&1
+    i=0
+    while [ $i -lt 20 ]; do
+        WSTATE=$(wpa_cli -i "$WIFI_IF" status 2>/dev/null | grep '^wpa_state=' | cut -d= -f2)
+        [ "$WSTATE" = "COMPLETED" ] && { echo "OK"; exit 0; }
+        sleep 1; i=$((i+1))
+    done
+    echo "FAIL timeout"
+    exit 1
+    ;;
+# ---- bluetooth ---------------------------------------------------------
+bt:status)
+    OUT=$(bluetoothctl show 2>/dev/null)
+    [ -z "$OUT" ] && { echo "off"; exit 0; }
+    echo "$OUT" | grep -q 'Powered: yes' && echo "powered" || echo "off"
+    ;;
+bt:devices)
+    bluetoothctl devices 2>/dev/null | sed 's/^Device //;s/ /\t/'
+    ;;
+bt:scan)
+    bluetoothctl --timeout 10 -- scan on >/dev/null 2>&1
+    bluetoothctl devices 2>/dev/null | sed 's/^Device //;s/ /\t/'
+    ;;
+bt:pair)
+    MAC="$1"
+    bluetoothctl --timeout 20 -- pair "$MAC" >/dev/null 2>&1 || { echo "FAIL pair"; exit 1; }
+    bluetoothctl trust "$MAC" >/dev/null 2>&1
+    bluetoothctl connect "$MAC" >/dev/null 2>&1
+    echo "OK"
+    ;;
+bt:power)
+    bluetoothctl power "$1" >/dev/null 2>&1 && echo "OK" || echo "FAIL"
+    ;;
+# ---- net ---------------------------------------------------------------
+net:status)
+    # Summary lines (status bar): eth=<ip>|no link, wifi=<ip>|<state>|no adapter
+    # Detail lines, one per interface (TAB-separated):
+    #   iface <name> <type:ethernet|wifi> <state> <ip/cidr|-> <mac> <gateway|-> <dns|-> <speed|->
+    GW_DEV=$(ip route show default 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev") {print $(i+1); exit}}')
+    GW=$(ip route show default 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="via") {print $(i+1); exit}}')
+    DNS=$(awk '/^nameserver/ {printf "%s%s", sep, $2; sep=","}' /etc/resolv.conf 2>/dev/null)
+    ETH=""
+    for d in /sys/class/net/*; do
+        n=$(basename "$d")
+        [ "$n" = lo ] && continue
+        [ "$(cat "$d/type" 2>/dev/null)" = 1 ] || continue   # ARPHRD_ETHER only
+        case "$n" in
+            docker*|veth*|br-*|virbr*) continue ;;
+        esac
+        if [ -d "$d/wireless" ] || [ -d "$d/phy80211" ]; then t=wifi; else t=ethernet; fi
+        st=$(cat "$d/operstate" 2>/dev/null); [ -n "$st" ] || st=unknown
+        mac=$(cat "$d/address" 2>/dev/null)
+        ip4=$(ip -4 -o addr show dev "$n" 2>/dev/null | awk '{print $4; exit}')
+        sp=$(cat "$d/speed" 2>/dev/null)
+        case "$sp" in
+            ""|-*) sp=- ;;
+            *) sp="${sp} Mb/s" ;;
+        esac
+        if [ "$n" = "$GW_DEV" ]; then g=${GW:--}; dn=${DNS:--}; else g=-; dn=-; fi
+        printf 'iface\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$n" "$t" "$st" "${ip4:--}" "${mac:--}" "$g" "$dn" "$sp"
+        [ "$t" = ethernet ] && [ -z "$ETH" ] && [ -n "$ip4" ] && ETH=${ip4%/*}
+    done
+    [ -n "$ETH" ] && echo "eth=$ETH" || echo "eth=no link"
+    if [ -n "$WIFI_IF" ]; then
+        WSTATE=$(wpa_cli -i "$WIFI_IF" status 2>/dev/null | grep '^wpa_state=' | cut -d= -f2)
+        WIP=$(ip -4 addr show "$WIFI_IF" 2>/dev/null | grep -oE 'inet [0-9.]+' | awk '{print $2}')
+        [ -n "$WIP" ] && echo "wifi=$WIP" || echo "wifi=${WSTATE:-disconnected}"
+    else
+        echo "wifi=no adapter"
+    fi
+    ;;
+# ---- sys ---------------------------------------------------------------
+sys:info)
+    echo "hostname=$(hostname)"
+    echo "timezone=$(cat /etc/timezone 2>/dev/null || readlink /etc/localtime 2>/dev/null | sed 's|.*/zoneinfo/||')"
+    # Storage (root fs free)
+    df -h / 2>/dev/null | awk 'NR==2 {print $4" free of "$2}' | sed 's/^/storage=/'
+    # RAM
+    free -h 2>/dev/null | awk '/Mem:/ {print "ram="$3" used of "$2}'
+    # CPU temp
+    TEMP=$(cat /sys/class/thermal/thermal_zone*/temp 2>/dev/null | head -1)
+    if [ -n "$TEMP" ]; then
+        echo "temp=$((TEMP / 1000))C"
+    else
+        echo "temp=n/a"
+    fi
+    # Uptime (busybox has no -p)
+    echo "uptime=$(uptime 2>/dev/null | sed 's/.*up \([^,]*\),.*/\1/')"
+    ;;
+sys:timezone/cycle)
+    TZ=$(cat /etc/timezone 2>/dev/null)
+    # Simple cycle through a few common zones
+    case "$TZ" in
+        UTC) NEXT="America/New_York" ;;
+        America/New_York) NEXT="Europe/London" ;;
+        Europe/London) NEXT="Europe/Berlin" ;;
+        Europe/Berlin) NEXT="UTC" ;;
+        *) NEXT="UTC" ;;
+    esac
+    setup-timezone "$NEXT" >/dev/null 2>&1
+    echo "$NEXT"
+    ;;
+sys:ntp/sync)
+    if command -v chronyd >/dev/null 2>&1; then
+        chronyc -a 'rekey' >/dev/null 2>&1 && echo "OK" || echo "FAIL"
+    else
+        apk add --no-cache chrony >/dev/null 2>&1 && rc-service chrony restart >/dev/null 2>&1 && echo "OK" || echo "FAIL"
+    fi
+    ;;
+sys:upgrade)
+    apk update 2>&1
+    apk upgrade 2>&1
+    echo "OK"
+    ;;
+# ---- power -------------------------------------------------------------
+power:shutdown) poweroff ;;
+power:reboot)   reboot ;;
+power:suspend)  echo mem > /sys/power/state ;;
+*)
+    echo "usage: foyer-ctl <group> <cmd> [args]" >&2
+    exit 1
+    ;;
+esac

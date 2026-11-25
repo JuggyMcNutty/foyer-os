@@ -1,0 +1,4 @@
+[submodule "foyer"]
+	path = foyer
+	url = git@github.com:JuggyMcNutty/foyer.git
+	branch = main

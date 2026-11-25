@@ -1,0 +1,11 @@
+# build outputs & caches
+/out/
+/.cache/
+build/
+# third-party source checkouts (fetched by APKBUILDs at pinned tags)
+/red/
+/jellyfin-desktop/
+/big-launcher-assets/
+/big-launcher/  # pre-rename checkout (now the foyer/ submodule)
+# local agent state
+/.pi/

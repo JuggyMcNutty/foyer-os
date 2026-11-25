@@ -1,0 +1,71 @@
+#!/bin/sh
+# foyer-app — app launcher wrappers, run by Foyer inside gamescope.
+# Invoked as `foyer-app <id>` or through a legacy symlink `htpc-<id>`.
+# URLs are read from $FOYER_CONF/*.url so they can change without editing scripts.
+
+HTPC_CONF=${FOYER_CONF:-/etc/foyer}
+[ -d "$HTPC_CONF" ] || HTPC_CONF=/etc/htpc
+export PATH="/usr/local/sbin:/usr/local/bin:$PATH"
+# The session runs as root (for now); Chromium and QtWebEngine (Red,
+# jellyfin-desktop) refuse to start as root unless the sandbox is disabled.
+# TODO(foyer-os): run apps as an unprivileged user and drop this.
+if [ "$(id -u)" = 0 ]; then
+    export QTWEBENGINE_DISABLE_SANDBOX=1
+    NOSANDBOX="--no-sandbox"
+fi
+CHROMIUM_ARGS="$NOSANDBOX --kiosk --start-fullscreen --noerrdialogs --disable-session-crashed-bubble --no-first-run --disable-features=Translate"
+SMARTTV_UA='Mozilla/5.0 (Linux; Tizen 2.3; SmartHub; SMART-TV) AppleWebKit/538.1 (KHTML, like Gecko) TV Safari/538.1'
+
+read_url() {
+    f="$HTPC_CONF/$1.url"
+    [ -r "$f" ] && tr -d '\n' < "$f"
+}
+
+have() { command -v "$1" >/dev/null 2>&1; }
+
+die() { echo "foyer-app: $*" >&2; exit 127; }
+
+# App id: from a legacy symlink name (htpc-jellyfin -> jellyfin), else first arg
+SELF=$(basename "$0")
+case "$SELF" in
+    htpc-app|foyer-app) APP="$1"; [ $# -gt 0 ] && shift ;;
+    htpc-*) APP=${SELF#htpc-} ;;
+    foyer-*) APP=${SELF#foyer-} ;;
+    *) APP="$1"; [ $# -gt 0 ] && shift ;;
+esac
+
+case "$APP" in
+jellyfin)
+    if have jellyfin-desktop; then
+        exec jellyfin-desktop --tv "$@"
+    fi
+    URL=$(read_url jellyfin)
+    [ -n "$URL" ] || die "no jellyfin-desktop and no $HTPC_CONF/jellyfin.url"
+    have chromium || die "command not found: chromium"
+    exec chromium $CHROMIUM_ARGS "$URL"
+    ;;
+youtube|red)
+    # Red is our YouTube client (TV mode); fall back to youtube.com/tv in chromium.
+    if have red; then
+        exec red --tv "$@"
+    fi
+    have chromium || die "command not found: red (and no chromium fallback)"
+    exec chromium $CHROMIUM_ARGS --user-agent="$(cat "$HTPC_CONF/smarttv-ua" 2>/dev/null || echo "$SMARTTV_UA")" "https://www.youtube.com/tv"
+    ;;
+amazon|twitch)
+    URL=$(read_url "$APP")
+    [ -n "$URL" ] || die "missing $HTPC_CONF/$APP.url"
+    have chromium || die "command not found: chromium"
+    exec chromium $CHROMIUM_ARGS "$URL"
+    ;;
+iptv)
+    have mpv || die "command not found: mpv"
+    SRC=$(read_url iptv)
+    [ -n "$SRC" ] || SRC="$HTPC_CONF/iptv.m3u"
+    exec mpv --fs --loop-playlist --really-quiet --osd-level=1 "$SRC"
+    ;;
+*)
+    echo "usage: foyer-app {jellyfin|youtube|amazon|twitch|iptv}" >&2
+    exit 2
+    ;;
+esac

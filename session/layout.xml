@@ -1,0 +1,80 @@
+<layout>
+
+    <menu title="Media">
+
+        <entry title="Jellyfin">
+            <command>foyer-app jellyfin</command>
+            <card>
+                <icon>assets/icons/jellyfin.svg</icon>
+                <background>#000B25</background>
+            </card>
+        </entry>
+
+        <entry title="YouTube">
+            <command>foyer-app youtube</command>
+            <card>
+                <icon>assets/icons/red.svg</icon>
+                <background>#211F23</background>
+            </card>
+        </entry>
+
+        <entry title="Prime Video">
+            <command>foyer-app amazon</command>
+            <card>
+                <icon>assets/icons/amazon.svg</icon>
+                <background>#00A8E1</background>
+            </card>
+        </entry>
+
+        <entry title="Twitch">
+            <command>foyer-app twitch</command>
+            <card>
+                <icon>assets/icons/twitch.svg</icon>
+                <background>#0e0e10</background>
+            </card>
+        </entry>
+
+        <entry title="IPTV">
+            <command>foyer-app iptv</command>
+            <card>
+                <icon>assets/icons/iptv.svg</icon>
+                <background>#4B9CD6</background>
+            </card>
+        </entry>
+
+    </menu>
+
+    <menu title="Settings">
+
+        <entry title="WiFi">
+            <command>:wifi</command>
+            <card>
+                <icon>assets/icons/wifi.svg</icon>
+                <background>#1E6BB8</background>
+            </card>
+        </entry>
+
+        <entry title="Bluetooth">
+            <command>:bt</command>
+            <card>
+                <icon>assets/icons/bluetooth.svg</icon>
+                <background>#0082FB</background>
+            </card>
+        </entry>
+
+        <entry title="Layout">
+            <command>:layout</command>
+            <card>
+                <background>#5A3E8C</background>
+            </card>
+        </entry>
+
+    </menu>
+
+    <!-- Sidebar commands -->
+    <command title="Restart UI">:quit</command>
+    <command title="Reboot">:restart</command>
+    <command title="Shutdown">:shutdown</command>
+    <command title="Sleep">:sleep</command>
+
+</layout>
