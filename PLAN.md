@@ -341,10 +341,10 @@ Phase E
 - [x] **C4** Layout editor + per-app metadata/art editor; OSK rebuild
 - [x] **C5** Quick-access overlay rebuilt; default + light themes; delete old UI code
 - [x] **D1** APKBUILDs (foyer, foyer-sdl3_image, foyer-red, foyer-jellyfin-desktop, foyer-session, foyer-update)
-- [ ] **D2** `alpine-env.sh` (minirootfs + sha256 lock + bwrap) and `build-apks.sh` — green locally
+- [x] **D2** `alpine-env.sh` (minirootfs + sha256 lock + bwrap) and `build-apks.sh` — green locally
       in the distrobox
-- [ ] **D3** profiles (`ideapad-120s`, `generic-x86_64`) + `provision.sh`; re-provision the box
-- [ ] **D4** rootless `make-image.sh` (mkfs.ext4 -d / mtools / sfdisk) → bootable raw image;
+- [x] **D3** profiles (`ideapad-120s`, `generic-x86_64`) + `provision.sh`; re-provision the box
+- [x] **D4** rootless `make-image.sh` (mkfs.ext4 -d / mtools / sfdisk) → bootable raw image;
       QEMU boot-test (UEFI + BIOS) in CI, and locally via Alpine's `qemu-system-x86_64` +
       `ovmf` inside the sandbox (TCG, no KVM needed)
 - [ ] **D5** GitHub Actions release workflow (foyer-os) + CI (foyer); `foyer-update` pulls from releases

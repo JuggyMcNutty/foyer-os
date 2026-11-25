@@ -45,7 +45,11 @@ RW=${RENDER_WIDTH:-$WIDTH}; RH=${RENDER_HEIGHT:-$HEIGHT}
 [ -n "$RW" ] && GS_ARGS="$GS_ARGS -w $RW"
 [ -n "$RH" ] && GS_ARGS="$GS_ARGS -h $RH"
 
-# Audio: PipeWire + pulse compat (HDMI sink picked by wireplumber)
+# Audio: PipeWire + pulse compat + WirePlumber. The previous session's
+# daemons survive a gamescope crash/respawn (a half-dead set, e.g. no
+# wireplumber, makes PipeWire clients hang), so always start a fresh trio.
+for d in wireplumber pipewire-pulse pipewire; do pkill -x "$d" 2>/dev/null; done
+sleep 0.3
 pipewire >/dev/null 2>&1 &
 pipewire-pulse >/dev/null 2>&1 &
 wireplumber >/dev/null 2>&1 &

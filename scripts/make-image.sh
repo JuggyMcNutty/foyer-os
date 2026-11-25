@@ -134,7 +134,7 @@ for s in modules sysctl hostname bootmisc syslog hwclock swap; do [ -e "$ROOTFS/
 for s in networking sshd chronyd local seatd dbus; do [ -e "$ROOTFS/etc/init.d/$s" ] && ln -sf /etc/init.d/$s "$ROOTFS/etc/runlevels/default/$s"; done
 for s in mount-ro killprocs savecache; do ln -sf /etc/init.d/$s "$ROOTFS/etc/runlevels/shutdown/$s"; done
 # the session package's post-install ran inside apk; make sure tty1 is ours
-sed -i 's|^tty1::.*|tty1::respawn:/bin/sh /etc/foyer/session.sh|' "$ROOTFS/etc/inittab"
+sed -i 's|^tty1::.*|tty1::respawn:/bin/sh /usr/lib/foyer/session.sh|' "$ROOTFS/etc/inittab"
 cp "$OUT/.session.conf" "$ROOTFS/etc/foyer/session.conf"
 echo "$PROFILE_NAME" > "$ROOTFS/etc/foyer/profile"
 echo "$VERSION" > "$ROOTFS/etc/foyer/release"
@@ -155,7 +155,7 @@ case "$PROFILE_NAME" in qemu*)
     CMDLINE="$CMDLINE console=ttyS0,115200"
     grep -q '^ttyS0' "$ROOTFS/etc/inittab" || echo 'ttyS0::respawn:/sbin/getty -L 115200 ttyS0 vt100' >> "$ROOTFS/etc/inittab"
     # make session output visible on the serial console for the boot test
-    sed -i 's|^tty1::.*|tty1::respawn:/bin/sh -c "FOYER_LOG_STDERR=info /etc/foyer/session.sh 2>\&1 \| tee /dev/ttyS0"|' "$ROOTFS/etc/inittab"
+    sed -i 's|^tty1::.*|tty1::respawn:/bin/sh -c "FOYER_LOG_STDERR=info /usr/lib/foyer/session.sh 2>\&1 \| tee /dev/ttyS0"|' "$ROOTFS/etc/inittab"
     ;;
 esac
 # UEFI: systemd-boot as the fallback loader

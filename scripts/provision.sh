@@ -37,10 +37,17 @@ if [ $SRC = local ]; then
     scp -q "$APKS"/*.apk "$HOST:$STAGE/"
 fi
 
-ssh "$HOST" STAGE="$STAGE" PKGS="$PKGS" SRC="$SRC" TAG="$TAG" HOSTNAME_="$HOSTNAME" \
-    ALPINE_BRANCH="$ALPINE_BRANCH" ALPINE_MIRROR="$ALPINE_MIRROR" SWAP_MB="$SWAP_MB" \
-    ASSET_BUDGET_MB="$ASSET_BUDGET_MB" PROFILE_NAME="$PROFILE_NAME" sh -s <<'REMOTE'
+# Variables for the remote side (ssh flattens argv, so ship them as a file)
+{
+    for v in STAGE PKGS SRC TAG ALPINE_BRANCH ALPINE_MIRROR SWAP_MB ASSET_BUDGET_MB PROFILE_NAME; do
+        eval "val=\$$v"
+        printf "%s='%s'\n" "$v" "$val"
+    done
+    printf "HOSTNAME_='%s'\n" "$HOSTNAME"
+} | ssh "$HOST" "cat > $STAGE/env"
+ssh "$HOST" sh -s <<'REMOTE'
 set -eu
+. /tmp/foyer-provision/env
 echo "==> repositories ($ALPINE_BRANCH main + community)"
 printf '%s/%s/main\n%s/%s/community\n' "$ALPINE_MIRROR" "$ALPINE_BRANCH" "$ALPINE_MIRROR" "$ALPINE_BRANCH" > /etc/apk/repositories
 apk update -q
@@ -76,7 +83,9 @@ if [ "$SWAP_MB" -gt 0 ] && [ ! -f /swapfile ] && ! grep -q swap /etc/fstab; then
     echo '/swapfile none swap sw 0 0' >> /etc/fstab
     rc-update add swap boot >/dev/null 2>&1 || true
 fi
-for s in sshd chronyd networking; do rc-update add $s default >/dev/null 2>&1 || true; done
+for s in sshd networking; do rc-update add $s default >/dev/null 2>&1 || true; done
+# time sync: keep an existing ntpd, else chronyd
+rc-update show default 2>/dev/null | grep -q ntpd || rc-update add chronyd default >/dev/null 2>&1 || true
 echo "$PROFILE_NAME" > /etc/foyer/profile
 echo "==> done: $(apk info -v foyer foyer-session 2>/dev/null | tr '\n' ' ')"
 REMOTE

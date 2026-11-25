@@ -7,9 +7,9 @@ rc-update del pipewire default >/dev/null 2>&1
 rc-update del pipewire-pulse default >/dev/null 2>&1
 if [ -f /etc/inittab ]; then
     if grep -q '^tty1::' /etc/inittab; then
-        sed -i 's|^tty1::.*|tty1::respawn:/bin/sh /etc/foyer/session.sh|' /etc/inittab
+        sed -i 's|^tty1::.*|tty1::respawn:/bin/sh /usr/lib/foyer/session.sh|' /etc/inittab
     else
-        echo 'tty1::respawn:/bin/sh /etc/foyer/session.sh' >> /etc/inittab
+        echo 'tty1::respawn:/bin/sh /usr/lib/foyer/session.sh' >> /etc/inittab
     fi
 fi
 # legacy /etc/htpc -> /etc/foyer (pre-rename boxes)
@@ -18,4 +18,6 @@ if [ -d /etc/htpc ] && [ ! -L /etc/htpc ]; then
     rm -rf /etc/htpc
 fi
 [ -e /etc/htpc ] || ln -s foyer /etc/htpc
+# old location (pre-packaging); a stale copy there must not be used
+rm -f /etc/foyer/session.sh /etc/foyer/session.sh.apk-new /etc/foyer/session.sh.bak
 exit 0

@@ -1,0 +1,85 @@
+name: build & release
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apks:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+      - name: bubblewrap
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap zstd
+          # Ubuntu 24.04 restricts unprivileged user namespaces via AppArmor
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+      - uses: actions/cache@v4
+        with:
+          path: .cache/distfiles
+          key: distfiles-${{ hashFiles('aports/*/APKBUILD') }}
+          restore-keys: distfiles-
+      - name: build APKs (Alpine sandbox)
+        run: scripts/build-apks.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apks-x86_64
+          path: out/apks/x86_64/*.apk
+
+  image:
+    needs: apks
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [qemu, ideapad-120s, generic-x86_64]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap zstd
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          sudo chmod 666 /dev/kvm || true
+      - uses: actions/download-artifact@v4
+        with:
+          name: apks-x86_64
+          path: out/apks/x86_64
+      - name: make image
+        run: scripts/make-image.sh ${{ matrix.profile }}
+        env:
+          FOYER_SSH_PUBKEY: ${{ vars.FOYER_SSH_PUBKEY }}
+      - name: boot test (BIOS + UEFI)
+        if: matrix.profile == 'qemu'
+        run: |
+          img=$(ls out/foyer-os-qemu-*.img)
+          FOYER_EXPECT_UI=1 scripts/boot-test.sh "$img" bios 600
+          FOYER_EXPECT_UI=1 scripts/boot-test.sh "$img" uefi 600
+      - uses: actions/upload-artifact@v4
+        with:
+          name: image-${{ matrix.profile }}
+          path: out/foyer-os-*.img.zst
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [apks, image]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: checksums
+        run: cd dist && sha256sum * > SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
