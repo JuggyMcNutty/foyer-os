@@ -10,7 +10,7 @@
 set -eu
 HERE=$(cd "$(dirname "$0")" && pwd)
 PKGS="${*:-foyer foyer-session foyer-update foyer-jellyfin-desktop}"
-exec "$HERE/debian-env.sh" --suite trixie /bin/sh -eu -s -- $PKGS <<'INNER'
+exec "$HERE/debian-env.sh" --suite trixie /bin/sh -eu${FOYER_TRACE:+x} -s -- $PKGS <<'INNER'
 . /work/debian/packages.sh
 cat > /etc/apt/sources.list <<SRC
 deb http://deb.debian.org/debian trixie main contrib non-free non-free-firmware
@@ -95,7 +95,9 @@ PI
   foyer-jellyfin-desktop)
     apt-get install -y -qq qt6-base-dev qt6-base-private-dev qt6-webengine-dev qt6-webchannel-dev qt6-declarative-dev \
         qt6-declarative-private-dev libmpv-dev libsdl2-dev libcec-dev python3 extra-cmake-modules >/dev/null
-    . /work/aports/foyer-jellyfin-desktop/APKBUILD 2>/dev/null || true
+    # pinned versions shared with the APKBUILD
+    A=/work/aports/foyer-jellyfin-desktop/APKBUILD
+    pkgver=$(sed -n 's/^pkgver=//p' $A); _tag=$(sed -n 's/^_tag=//p' $A); _mpvqt=$(sed -n 's/^_mpvqt=//p' $A)
     T=/tmp/jf; rm -rf $T; mkdir -p $T
     curl -fsSL "https://github.com/jellyfin/jellyfin-desktop/archive/refs/tags/$_tag.tar.gz" | tar -xz -C $T
     curl -fsSL "https://invent.kde.org/libraries/mpvqt/-/archive/$_mpvqt/mpvqt-$_mpvqt.tar.gz" | tar -xz -C $T

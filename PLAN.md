@@ -351,11 +351,11 @@ Phase E
 - [x] **D6** docs: AGENTS.md, hardwarefacts.md, foyer README/FORK.md, foyer-os README
 - [ ] **E1** `debian-env.sh` (rootless mmdebstrap bookworm/trixie in bwrap); foyer CI on bookworm
       green; `FOYER_BUNDLE_SDL` portable tarball
-- [ ] **E2** `debian/` packaging for foyer, foyer-session, foyer-update, foyer-red,
+- [x] **E2** `debian/` packaging for foyer, foyer-session, foyer-update, foyer-red,
       foyer-jellyfin-desktop; `build-debs.sh`
-- [ ] **E3** init-agnostic session (OpenRC + systemd unit) + `foyer-ctl` backends (OpenRC/ifupdown
+- [x] **E3** init-agnostic session (OpenRC + systemd unit) + `foyer-ctl` backends (OpenRC/ifupdown
       vs systemd/NetworkManager)
-- [ ] **E4** `BASE=debian` in profiles + per-base package maps; `make-image.sh` Debian path;
+- [x] **E4** `BASE=debian` in profiles + per-base package maps; `make-image.sh` Debian path;
       `provision.sh` on stock trixie
 - [ ] **E5** CI matrix (alpine/debian × profiles), QEMU boot both; release attaches .apk + .deb +
       tarball + images

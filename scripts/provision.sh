@@ -23,11 +23,46 @@ while [ $# -gt 0 ]; do
         *) echo "unknown option $1" >&2; exit 2 ;;
     esac
 done
-[ "$BASE" = alpine ] || { echo "provision.sh: BASE=$BASE not supported yet (use scripts/provision-debian.sh)" >&2; exit 1; }
 
 PKGS=$(profile_pkgs)
 SESSION_CONF=$(profile_session_conf)
-echo "==> provisioning $HOST as '$PROFILE_TITLE' ($PROFILE_NAME)"
+echo "==> provisioning $HOST as '$PROFILE_TITLE' ($PROFILE_NAME, $BASE)"
+
+if [ "$BASE" = debian ]; then
+    # Stock Debian (trixie) target: apt packages + our .debs, systemd session.
+    DEBS="${DEBS:-$REPO/out/debs/$SUITE}"
+    STAGE=/tmp/foyer-provision
+    ssh "$HOST" "rm -rf $STAGE && mkdir -p $STAGE"
+    if [ $SRC = local ]; then
+        ls "$DEBS"/foyer_*.deb >/dev/null 2>&1 || { echo "no .debs in $DEBS (run scripts/build-debs.sh)" >&2; exit 1; }
+        scp -q "$DEBS"/*.deb "$HOST:$STAGE/"
+    fi
+    ssh "$HOST" "SUITE=$SUITE SRC=$SRC TAG=$TAG HOSTNAME_=$HOSTNAME PROFILE_NAME=$PROFILE_NAME" sh -s -- $PKGS <<'REMOTE'
+set -eu
+export DEBIAN_FRONTEND=noninteractive
+cat > /etc/apt/sources.list.d/foyer-os.list <<SRC
+deb http://deb.debian.org/debian $SUITE main contrib non-free non-free-firmware
+deb http://deb.debian.org/debian $SUITE-backports main contrib non-free non-free-firmware
+SRC
+apt-get update -qq
+apt-get install -y -qq "$@"
+if [ "$SRC" = release ]; then
+    apt-get install -y -qq curl
+    curl -fsSL "https://api.github.com/repos/JuggyMcNutty/foyer-os/releases/tags/$TAG" |
+        sed -n 's/.*"browser_download_url": *"\([^"]*\.deb\)".*/\1/p' | while read -r u; do curl -fsSL -o /tmp/foyer-provision/$(basename "$u") "$u"; done
+fi
+apt-get install -y -qq -t "$SUITE-backports" gamescope pipewire pipewire-pulse wireplumber /tmp/foyer-provision/*.deb
+echo "$HOSTNAME_" > /etc/hostname; hostnamectl set-hostname "$HOSTNAME_" 2>/dev/null || true
+echo "$PROFILE_NAME" > /etc/foyer/profile
+systemctl daemon-reload
+systemctl disable getty@tty1.service 2>/dev/null || true
+systemctl enable foyer-session.service NetworkManager.service seatd.service ssh.service 2>/dev/null || true
+echo "==> done: $(dpkg-query -W -f '${Package} ${Version}\n' 'foyer*' | tr '\n' ' ')"
+REMOTE
+    printf '%s\n' "$SESSION_CONF" | ssh "$HOST" 'f=/etc/foyer/session.conf; grep -q "^WIDTH=[0-9]" $f 2>/dev/null || cat > $f'
+    echo "==> provisioned. Start the session: ssh $HOST systemctl restart foyer-session"
+    exit 0
+fi
 
 STAGE=/tmp/foyer-provision
 ssh "$HOST" "rm -rf $STAGE && mkdir -p $STAGE"

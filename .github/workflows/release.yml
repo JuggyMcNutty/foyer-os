@@ -9,76 +9,108 @@ on:
 permissions:
   contents: write
 
+env:
+  # rootless sandboxes (bubblewrap) need unprivileged user namespaces
+  SETUP: |
+    sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap zstd
+    sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+    sudo chmod 666 /dev/kvm || true
+
 jobs:
+  # ---- packages -----------------------------------------------------------
   apks:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-          fetch-depth: 0
-      - name: bubblewrap
-        run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap zstd
-          # Ubuntu 24.04 restricts unprivileged user namespaces via AppArmor
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+        with: { submodules: recursive, fetch-depth: 0 }
+      - run: eval "$SETUP"
       - uses: actions/cache@v4
         with:
           path: .cache/distfiles
           key: distfiles-${{ hashFiles('aports/*/APKBUILD') }}
           restore-keys: distfiles-
-      - name: build APKs (Alpine sandbox)
+      - name: build APKs (Alpine/musl sandbox)
         run: scripts/build-apks.sh
       - uses: actions/upload-artifact@v4
-        with:
-          name: apks-x86_64
-          path: out/apks/x86_64/*.apk
+        with: { name: apks-x86_64, path: out/apks/x86_64/*.apk }
 
+  debs:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive, fetch-depth: 0 }
+      - run: eval "$SETUP"
+      - name: build .debs (Debian trixie/glibc sandbox)
+        run: scripts/build-debs.sh
+      - uses: actions/upload-artifact@v4
+        with: { name: debs-trixie, path: out/debs/trixie/*.deb }
+
+  portable:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive, fetch-depth: 0 }
+      - run: eval "$SETUP"
+      - name: portable glibc tarball (built on bookworm, glibc <= 2.36)
+        run: scripts/build-portable.sh
+      - name: check glibc floor
+        run: |
+          mkdir t && zstd -dc out/foyer-*-x86_64-glibc.tar.zst | tar -x -C t
+          max=$(objdump -T t/usr/bin/foyer | grep -oE 'GLIBC_[0-9.]+' | sort -V -u | tail -1)
+          echo "max glibc symbol: $max"
+          [ "$(printf '%s\nGLIBC_2.36\n' "$max" | sort -V | tail -1)" = GLIBC_2.36 ]
+      - uses: actions/upload-artifact@v4
+        with: { name: portable-glibc, path: out/foyer-*-x86_64-glibc.tar.zst }
+
+  # ---- images (base x profile) --------------------------------------------
   image:
-    needs: apks
+    needs: [apks, debs]
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
-        profile: [qemu, ideapad-120s, generic-x86_64]
+        include:
+          - { base: alpine, profile: qemu,                boot: true }
+          - { base: alpine, profile: ideapad-120s,        boot: false }
+          - { base: alpine, profile: generic-x86_64,      boot: false }
+          - { base: debian, profile: qemu-debian,         boot: true }
+          - { base: debian, profile: generic-x86_64-debian, boot: false }
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq bubblewrap zstd
-          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
-          sudo chmod 666 /dev/kvm || true
+        with: { fetch-depth: 0 }
+      - run: eval "$SETUP"
       - uses: actions/download-artifact@v4
-        with:
-          name: apks-x86_64
-          path: out/apks/x86_64
+        with: { name: apks-x86_64, path: out/apks/x86_64 }
+      - uses: actions/download-artifact@v4
+        with: { name: debs-trixie, path: out/debs/trixie }
       - name: make image
-        run: scripts/make-image.sh ${{ matrix.profile }}
-        env:
-          FOYER_SSH_PUBKEY: ${{ vars.FOYER_SSH_PUBKEY }}
-      - name: boot test (BIOS + UEFI)
-        if: matrix.profile == 'qemu'
+        env: { FOYER_SSH_PUBKEY: "${{ vars.FOYER_SSH_PUBKEY }}" }
         run: |
-          img=$(ls out/foyer-os-qemu-*.img)
+          if [ "${{ matrix.base }}" = debian ]; then scripts/make-image-debian.sh ${{ matrix.profile }}
+          else scripts/make-image.sh ${{ matrix.profile }}; fi
+      - name: QEMU boot test (BIOS + UEFI)
+        if: matrix.boot
+        run: |
+          img=$(ls out/foyer-os-${{ matrix.profile }}-*.img)
           FOYER_EXPECT_UI=1 scripts/boot-test.sh "$img" bios 600
           FOYER_EXPECT_UI=1 scripts/boot-test.sh "$img" uefi 600
       - uses: actions/upload-artifact@v4
-        with:
-          name: image-${{ matrix.profile }}
-          path: out/foyer-os-*.img.zst
+        if: always()
+        with: { name: "boot-logs-${{ matrix.profile }}", path: out/boot-*.log, if-no-files-found: ignore }
+      - uses: actions/upload-artifact@v4
+        if: "!matrix.boot"   # test VM images aren't release assets
+        with: { name: "image-${{ matrix.profile }}", path: out/foyer-os-*.img.zst }
 
+  # ---- release --------------------------------------------------------------
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [apks, image]
+    needs: [apks, debs, portable, image]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/download-artifact@v4
-        with:
-          path: dist
-          merge-multiple: true
-      - name: checksums
-        run: cd dist && sha256sum * > SHA256SUMS
+        with: { path: dist, merge-multiple: true }
+      - run: rm -f dist/boot-*.log
+      - run: cd dist && rm -f *-dev-*.apk && sha256sum * > SHA256SUMS && ls -la
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
