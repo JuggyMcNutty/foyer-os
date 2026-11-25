@@ -1,0 +1,30 @@
+[Unit]
+Description=foyer-os TV session (gamescope + PipeWire + Foyer) on tty1
+After=systemd-user-sessions.service seatd.service NetworkManager.service sound.target
+Wants=seatd.service
+Conflicts=getty@tty1.service
+After=getty@tty1.service
+
+[Service]
+Type=simple
+User=root
+PAMName=login
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+UtmpIdentifier=tty1
+UtmpMode=user
+Environment=FOYER_INIT=systemd
+ExecStart=/bin/sh /usr/lib/foyer/session.sh
+Restart=always
+RestartSec=1
+# gamescope ignores SIGTERM
+KillMode=mixed
+KillSignal=SIGKILL
+
+[Install]
+WantedBy=graphical.target multi-user.target

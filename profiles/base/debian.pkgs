@@ -1,0 +1,17 @@
+# Logical package -> Debian trixie packages (+ trixie-backports for gamescope).
+base           systemd systemd-sysv udev dbus kmod iproute2 iputils-ping procps openssh-server sudo ca-certificates curl tzdata locales e2fsprogs fdisk util-linux systemd-timesyncd zstd less
+kernel-lts     linux-image-amd64
+kernel-virt    linux-image-cloud-amd64
+firmware-intel firmware-misc-nonfree firmware-intel-graphics intel-microcode
+firmware-rtl   firmware-realtek
+firmware-wifi  firmware-iwlwifi firmware-atheros firmware-mediatek
+gpu-intel      mesa-vulkan-drivers libgl1-mesa-dri intel-media-va-driver-non-free
+gpu-amd        mesa-vulkan-drivers libgl1-mesa-dri mesa-va-drivers firmware-amd-graphics
+gpu-generic    mesa-vulkan-drivers libgl1-mesa-dri
+net-ethernet   network-manager
+net-wifi       network-manager wpasupplicant iw
+bt             bluez
+apps-browser   chromium
+apps-media     mpv yt-dlp
+boot-uefi      systemd-boot systemd-boot-efi
+boot-bios      syslinux syslinux-common extlinux

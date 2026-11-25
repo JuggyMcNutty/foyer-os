@@ -3,7 +3,7 @@
 # app wrappers, default config and the runtime dependency set.
 pkgname=foyer-session
 pkgver=3.0.0
-pkgrel=2
+pkgrel=3
 pkgdesc="foyer-os session: gamescope + PipeWire + Foyer on tty1, foyer-ctl, app wrappers"
 url="https://github.com/JuggyMcNutty/foyer-os"
 arch="noarch"
@@ -22,6 +22,7 @@ package() {
 	install -Dm755 "$_src"/bin/foyer-app "$pkgdir"/usr/bin/foyer-app
 	# code, not config: lives in /usr so upgrades replace it
 	install -Dm755 "$_src"/session.sh "$pkgdir"/usr/lib/foyer/session.sh
+	install -Dm644 "$_src"/backend_openrc.sh "$pkgdir"/usr/lib/foyer/backend_openrc.sh
 	# compat names from the htpc-* era
 	ln -s foyer-ctl "$pkgdir"/usr/bin/htpc-ctl
 	ln -s foyer-ctl "$pkgdir"/usr/bin/htpc-net

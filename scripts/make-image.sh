@@ -127,6 +127,7 @@ if [ "$SWAP_MB" -gt 0 ]; then echo "/swapfile none swap sw 0 0" >> "$ROOTFS/etc/
 mkdir -p "$ROOTFS/root/.ssh"; chmod 700 "$ROOTFS/root/.ssh"
 cp "$OUT/.authorized_keys" "$ROOTFS/root/.ssh/authorized_keys"; chmod 600 "$ROOTFS/root/.ssh/authorized_keys"
 sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin prohibit-password/' "$ROOTFS/etc/ssh/sshd_config"
+rm -f "$ROOTFS"/etc/ssh/ssh_host_*   # generated per device by the sshd init script
 # services
 for s in devfs dmesg; do ln -sf /etc/init.d/$s "$ROOTFS/etc/runlevels/sysinit/$s"; done
 for s in udev udev-trigger udev-settle; do [ -e "$ROOTFS/etc/init.d/$s" ] && ln -sf /etc/init.d/$s "$ROOTFS/etc/runlevels/sysinit/$s"; done

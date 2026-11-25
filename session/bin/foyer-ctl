@@ -18,6 +18,18 @@ FOYER_CONF=${FOYER_CONF:-/etc/foyer}
 [ -d "$FOYER_CONF" ] || FOYER_CONF=/etc/htpc
 SESSION_CONF="$FOYER_CONF/session.conf"
 
+# Init/network backend (OpenRC+wpa_supplicant on Alpine, systemd+NM on Debian)
+if [ -d /run/systemd/system ]; then FOYER_INIT=systemd; else FOYER_INIT=openrc; fi
+for _b in "/usr/lib/foyer/backend_$FOYER_INIT.sh" "$(dirname "$0")/../backend_$FOYER_INIT.sh"; do
+    [ -r "$_b" ] && { . "$_b"; break; }
+done
+command -v be_poweroff >/dev/null 2>&1 || {
+    be_poweroff() { poweroff; }; be_reboot() { reboot; }; be_suspend() { echo mem > /sys/power/state; }
+    be_restart_session() { pkill -9 -x gamescope-wl 2>/dev/null || pkill -9 -x gamescope 2>/dev/null; }
+    be_ntp_sync() { return 1; }; be_upgrade() { return 1; }; be_wifi_kind() { echo wpa; }
+}
+WIFI_KIND=$(be_wifi_kind)
+
 WIFI_IF=""
 for iface in /sys/class/net/*; do
     case "$(basename "$iface")" in
@@ -32,6 +44,28 @@ esc_wpa() {
 GROUP="$1"; CMD="$2"
 [ $# -ge 2 ] && shift 2 || shift $#
 # From here on, command arguments are $1, $2, ...
+
+# ---- wifi via NetworkManager (Debian/systemd backend) -------------------
+if [ "$WIFI_KIND" = nm ]; then
+    case "$GROUP:$CMD" in
+    wifi:status)
+        [ -n "$WIFI_IF" ] || { echo "state=none"; exit 0; }
+        ST=$(nmcli -t -f GENERAL.STATE,GENERAL.CONNECTION device show "$WIFI_IF" 2>/dev/null)
+        echo "state=$(echo "$ST" | sed -n 's/^GENERAL.STATE:[0-9]* (\(.*\))/\1/p')"
+        echo "ssid=$(echo "$ST" | sed -n 's/^GENERAL.CONNECTION://p')"
+        exit 0 ;;
+    wifi:scan)
+        [ -n "$WIFI_IF" ] || exit 0
+        nmcli -t -f SSID,SIGNAL device wifi list --rescan yes ifname "$WIFI_IF" 2>/dev/null |
+            awk -F: '$1 != "" && !seen[$1]++ { printf "%s\t%d\n", $1, ($2 / 2) - 100 }'
+        exit 0 ;;
+    wifi:connect)
+        [ -n "$WIFI_IF" ] || { echo "FAIL no adapter"; exit 1; }
+        if [ -n "${2:-}" ]; then nmcli device wifi connect "$1" password "$2" ifname "$WIFI_IF" >/dev/null 2>&1
+        else nmcli device wifi connect "$1" ifname "$WIFI_IF" >/dev/null 2>&1; fi && { echo OK; exit 0; }
+        echo "FAIL"; exit 1 ;;
+    esac
+fi
 
 case "$GROUP:$CMD" in
 # ---- audio -------------------------------------------------------------
@@ -141,7 +175,7 @@ display:mode/revert)
         mv "$SESSION_CONF.prev" "$SESSION_CONF"
         rm -f "$SESSION_CONF.pending"
         echo "OK"
-        ( sleep 1; pkill -9 -f gamescope-wl 2>/dev/null || pkill -9 -x gamescope 2>/dev/null ) >/dev/null 2>&1 &
+        ( sleep 1; be_restart_session ) >/dev/null 2>&1 &
     else
         echo "FAIL nothing to revert"; exit 1
     fi
@@ -158,7 +192,7 @@ display:render/set)
         else echo "$kv" >> "$SESSION_CONF"; fi
     done
     echo "OK"
-    ( sleep 1; pkill -9 -f gamescope-wl 2>/dev/null || pkill -9 -x gamescope 2>/dev/null ) >/dev/null 2>&1 &
+    ( sleep 1; be_restart_session ) >/dev/null 2>&1 &
     ;;
 display:mode/get)
     # Current gamescope output mode from session.conf (WIDTH=/HEIGHT=/RATE=)
@@ -181,7 +215,7 @@ display:mode/set)
         cp "$SESSION_CONF" "$SESSION_CONF.prev"; touch "$SESSION_CONF.pending"
         for k in WIDTH HEIGHT RATE; do sed -i "s/^$k=.*/$k=/" "$SESSION_CONF"; done
         echo "OK"
-        ( sleep 1; pkill -9 -f gamescope-wl 2>/dev/null || pkill -9 -x gamescope 2>/dev/null ) >/dev/null 2>&1 &
+        ( sleep 1; be_restart_session ) >/dev/null 2>&1 &
         exit 0
     fi
     W=$(echo "$M" | cut -dx -f1)
@@ -201,12 +235,12 @@ display:mode/set)
         echo "OK"
         # Restart the session: init respawns session.sh. gamescope ignores
         # SIGTERM, so SIGKILL it (after replying).
-        ( sleep 1; pkill -9 -f gamescope-wl 2>/dev/null || pkill -9 -x gamescope 2>/dev/null ) >/dev/null 2>&1 &
+        ( sleep 1; be_restart_session ) >/dev/null 2>&1 &
     else
         echo "FAIL no session.conf"; exit 1
     fi
     ;;
-# ---- wifi --------------------------------------------------------------
+# ---- wifi (wpa_supplicant backend) -------------------------------------
 wifi:status)
     if [ -z "$WIFI_IF" ]; then echo "state=none"; exit 0; fi
     ST=$(wpa_cli -i "$WIFI_IF" status 2>/dev/null)
@@ -342,21 +376,17 @@ sys:timezone/cycle)
     echo "$NEXT"
     ;;
 sys:ntp/sync)
-    if command -v chronyd >/dev/null 2>&1; then
-        chronyc -a 'rekey' >/dev/null 2>&1 && echo "OK" || echo "FAIL"
-    else
-        apk add --no-cache chrony >/dev/null 2>&1 && rc-service chrony restart >/dev/null 2>&1 && echo "OK" || echo "FAIL"
-    fi
+    be_ntp_sync && echo "OK" || { echo "FAIL"; exit 1; }
     ;;
 sys:upgrade)
-    apk update 2>&1
-    apk upgrade 2>&1
+    if command -v foyer-update >/dev/null 2>&1; then foyer-update 2>&1; fi
+    be_upgrade 2>&1
     echo "OK"
     ;;
 # ---- power -------------------------------------------------------------
-power:shutdown) poweroff ;;
-power:reboot)   reboot ;;
-power:suspend)  echo mem > /sys/power/state ;;
+power:shutdown) be_poweroff ;;
+power:reboot)   be_reboot ;;
+power:suspend)  be_suspend ;;
 *)
     echo "usage: foyer-ctl <group> <cmd> [args]" >&2
     exit 1

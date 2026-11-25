@@ -5,8 +5,9 @@ load_profile() {
     case "$_p" in */*) ;; *) _p="$REPO/profiles/$_p.sh" ;; esac
     [ -f "$_p" ] || { echo "unknown profile: $1 (see profiles/)" >&2; exit 1; }
     BASE=alpine; ARCH=x86_64; WIFI=no; BT=no; BOOT=uefi; SWAP_MB=0; EXTRA_PKGS=""; FIRMWARE=""; RENDER_MAX=native
-    ASSET_BUDGET_MB=96; NET=net-ethernet; KERNEL=kernel-lts; GPU=gpu-generic; HOSTNAME=foyer
+    ASSET_BUDGET_MB=96; NET=net-ethernet; KERNEL=kernel-lts; GPU=gpu-generic; HOSTNAME=foyer; SUITE=trixie
     # shellcheck disable=SC1090
+    PROFILE_DIR=$(dirname "$_p")
     . "$_p"
     PROFILE_NAME=$(basename "$_p" .sh)
 }

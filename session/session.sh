@@ -1,13 +1,16 @@
 #!/bin/sh
-# foyer-os session — started by init on tty1 (OpenRC: /etc/inittab respawn).
-# Runs PipeWire + gamescope + the Foyer launcher.
+# foyer-os session — runs PipeWire + gamescope + the Foyer launcher on tty1.
+# Started by init: OpenRC via /etc/inittab respawn (Alpine) or systemd via
+# foyer-session.service (Debian). The same script works for both.
 
 FOYER_CONF=/etc/foyer
 [ -d "$FOYER_CONF" ] || FOYER_CONF=/etc/htpc
 export FOYER_CONF
 
+if [ -d /run/systemd/system ]; then FOYER_INIT=systemd; else FOYER_INIT=openrc; fi
+export FOYER_INIT
 # init gives us a minimal env: no /usr/local/bin, HOME=/
-export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games
 export HOME=/root
 export XDG_CONFIG_HOME=/root/.config
 export XDG_STATE_HOME=/var/lib/foyer/state
