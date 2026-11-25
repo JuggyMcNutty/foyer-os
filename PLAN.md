@@ -347,8 +347,8 @@ Phase E
 - [x] **D4** rootless `make-image.sh` (mkfs.ext4 -d / mtools / sfdisk) → bootable raw image;
       QEMU boot-test (UEFI + BIOS) in CI, and locally via Alpine's `qemu-system-x86_64` +
       `ovmf` inside the sandbox (TCG, no KVM needed)
-- [ ] **D5** GitHub Actions release workflow (foyer-os) + CI (foyer); `foyer-update` pulls from releases
-- [ ] **D6** docs: AGENTS.md, hardwarefacts.md, foyer README/FORK.md, foyer-os README
+- [x] **D5** GitHub Actions release workflow (foyer-os) + CI (foyer); `foyer-update` pulls from releases
+- [x] **D6** docs: AGENTS.md, hardwarefacts.md, foyer README/FORK.md, foyer-os README
 - [ ] **E1** `debian-env.sh` (rootless mmdebstrap bookworm/trixie in bwrap); foyer CI on bookworm
       green; `FOYER_BUNDLE_SDL` portable tarball
 - [ ] **E2** `debian/` packaging for foyer, foyer-session, foyer-update, foyer-red,
