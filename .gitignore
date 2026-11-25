@@ -2,10 +2,12 @@
 /out/
 /.cache/
 build/
-# third-party source checkouts (fetched by APKBUILDs at pinned tags)
+# third-party / legacy source checkouts (APKBUILDs fetch pinned tags)
 /red/
 /jellyfin-desktop/
 /big-launcher-assets/
-/big-launcher/  # pre-rename checkout (now the foyer/ submodule)
+/big-launcher/
 # local agent state
 /.pi/
+/aports/*/src/
+/aports/*/pkg/

@@ -1,0 +1,36 @@
+# Maintainer: JuggyMcNutty <JuggyMcNutty@users.noreply.github.com>
+# SDL3_image is not packaged in Alpine 3.24; Foyer needs it for PNG/JPG/WebP art.
+pkgname=foyer-sdl3_image
+_pkgname=SDL3_image
+pkgver=3.4.8
+pkgrel=0
+pkgdesc="Image loading library for SDL3 (Foyer build)"
+url="https://github.com/libsdl-org/SDL_image"
+arch="x86_64 aarch64"
+license="Zlib"
+depends_dev="sdl3-dev"
+makedepends="cmake samurai sdl3-dev libpng-dev libjpeg-turbo-dev libwebp-dev libavif-dev tiff-dev"
+provides="sdl3_image=$pkgver-r$pkgrel"
+subpackages="$pkgname-dev"
+source="https://github.com/libsdl-org/SDL_image/releases/download/release-$pkgver/$_pkgname-$pkgver.tar.gz"
+builddir="$srcdir/$_pkgname-$pkgver"
+options="!check"   # upstream tests need a display
+
+build() {
+	cmake -B build -G Ninja \
+		-DCMAKE_BUILD_TYPE=MinSizeRel \
+		-DCMAKE_INSTALL_PREFIX=/usr \
+		-DSDLIMAGE_VENDORED=OFF \
+		-DSDLIMAGE_SAMPLES=OFF \
+		-DSDLIMAGE_TESTS=OFF \
+		-DSDLIMAGE_AVIF=ON -DSDLIMAGE_WEBP=ON -DSDLIMAGE_TIF=ON -DSDLIMAGE_JXL=OFF
+	cmake --build build
+}
+
+package() {
+	DESTDIR="$pkgdir" cmake --install build
+}
+
+sha512sums="
+45f04c178a39ca05e033303cc650a6cbdab2ae41c68eb9d28f2f113f12bcb75c8001a1f45a17c4f1a8f5d46511a4f0dab7437dd07be8b5658e3992ddcbeb720f  SDL3_image-3.4.8.tar.gz
+"

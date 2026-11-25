@@ -324,23 +324,23 @@ Phase E
       push to box; confirm tiles launch
 - [x] **A2** per-app stderr log + meaningful failure toasts; JobQueue failure logging
 - [x] **A3** `htpc-ctl net status` per-interface; Network page shows eth0 ip/mac/gw/dns/speed
-- [ ] **B0** branch consolidation: archive tags (`archive/htpc-v1`, `upstream-2025-08`), `v2`→`main`
+- [x] **B0** branch consolidation: archive tags (`archive/htpc-v1`, `upstream-2025-08`), `v2`→`main`
       as default, delete `htpc`/`master`/`v2` on GitHub + locally (Phase A hotfix commits land
       first, so they're on `main`); then rename: fork → `foyer`, create `foyer-os` repo (git init this dir, `foyer` as
       submodule), `BL::`→`Foyer::`, binary/paths/scripts per the naming map, compat symlinks;
       build + 7 tests green
-- [ ] **B1** tag `v2.0.0` on `main` (pre-rewrite rollback point); vendor toml++; `units` (dp, breakpoints, safe area) + tests
-- [ ] **B2** Node tree, Rect/Text/Image, flex layout + tests; renderer clip stack/9-slice
-- [ ] **B3** springs + property tweens; Scroller; focus engine + tests
-- [ ] **B4** AssetCache (async decode, LRU budget), Blur node
-- [ ] **B5** remove letterbox; relayout on display-mode change; render at 480p/720p/1080p/4K with
+- [x] **B1** tag `v2.0.0` on `main` (pre-rewrite rollback point); vendor toml++; `units` (dp, breakpoints, safe area) + tests
+- [x] **B2** Node tree, Rect/Text/Image, flex layout + tests; renderer clip stack/9-slice
+- [x] **B3** springs + property tweens; Scroller; focus engine + tests
+- [x] **B4** AssetCache (async decode, LRU budget), Blur node
+- [x] **B5** remove letterbox; relayout on display-mode change; render at 480p/720p/1080p/4K with
       no clipped or overlapping UI (screenshots via `--screenshot` debug flag)
-- [ ] **C1** TOML settings/layout/apps.d/theme loaders + importer from xml/ini + round-trip tests
-- [ ] **C2** Shell (top nav, status icons, toasts) + Home (hero + rows) + Library
-- [ ] **C3** Settings pages on the engine; Display with real modes + keep/revert; Appearance page
-- [ ] **C4** Layout editor + per-app metadata/art editor; OSK rebuild
-- [ ] **C5** Quick-access overlay rebuilt; default + light themes; delete old UI code
-- [ ] **D1** APKBUILDs (foyer, foyer-sdl3_image, foyer-red, foyer-jellyfin-desktop, foyer-session, foyer-update)
+- [x] **C1** TOML settings/layout/apps.d/theme loaders + importer from xml/ini + round-trip tests
+- [x] **C2** Shell (top nav, status icons, toasts) + Home (hero + rows) + Library
+- [x] **C3** Settings pages on the engine; Display with real modes + keep/revert; Appearance page
+- [x] **C4** Layout editor + per-app metadata/art editor; OSK rebuild
+- [x] **C5** Quick-access overlay rebuilt; default + light themes; delete old UI code
+- [x] **D1** APKBUILDs (foyer, foyer-sdl3_image, foyer-red, foyer-jellyfin-desktop, foyer-session, foyer-update)
 - [ ] **D2** `alpine-env.sh` (minirootfs + sha256 lock + bwrap) and `build-apks.sh` — green locally
       in the distrobox
 - [ ] **D3** profiles (`ideapad-120s`, `generic-x86_64`) + `provision.sh`; re-provision the box

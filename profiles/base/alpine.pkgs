@@ -1,0 +1,18 @@
+# Logical package -> Alpine packages. Used by provision.sh and make-image.sh.
+# Format: <logical> <pkg> [<pkg>...]
+base           alpine-base openrc busybox-openrc busybox-mdev-openrc chrony e2fsprogs openssh openssh-server-pam tzdata ca-certificates curl
+kernel-lts     linux-lts
+kernel-virt    linux-virt linux-firmware-none
+firmware-intel linux-firmware-i915 linux-firmware-intel
+firmware-rtl   linux-firmware-rtl_nic
+firmware-wifi  linux-firmware-ath10k linux-firmware-rtlwifi linux-firmware-mediatek
+gpu-intel      mesa-dri-gallium mesa-vulkan-intel mesa-va-gallium intel-media-driver libva-intel-driver
+gpu-amd        mesa-dri-gallium mesa-vulkan-ati mesa-va-gallium linux-firmware-amdgpu
+gpu-generic    mesa-dri-gallium mesa-vulkan-swrast
+net-ethernet   ifupdown-ng
+net-wifi       wpa_supplicant iw
+bt             bluez bluez-openrc
+apps-browser   chromium
+apps-media     mpv yt-dlp
+boot-uefi      systemd-boot
+boot-bios      syslinux

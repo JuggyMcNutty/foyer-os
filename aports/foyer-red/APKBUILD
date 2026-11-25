@@ -1,0 +1,35 @@
+# Maintainer: JuggyMcNutty <JuggyMcNutty@users.noreply.github.com>
+# Red: Qt6 YouTube client with a TV (living-room) mode. Foyer's YouTube tile.
+pkgname=foyer-red
+_pkgname=red
+pkgver=10.4.0
+pkgrel=0
+pkgdesc="Red YouTube client (TV mode), built for Foyer"
+url="https://github.com/keshavbhatt/red"
+arch="x86_64 aarch64"
+license="GPL-3.0-or-later"
+depends="qt6-qtwebengine qt6-qtsvg"
+makedepends="cmake samurai qt6-qtbase-dev qt6-qtwebengine-dev qt6-qtwebchannel-dev qt6-qtsvg-dev qt6-qtdeclarative-dev"
+provides="red=$pkgver-r$pkgrel"
+source="$_pkgname-$pkgver.tar.gz::https://github.com/keshavbhatt/red/archive/refs/tags/v$pkgver.tar.gz
+	musl-execinfo.patch"
+builddir="$srcdir/$_pkgname-$pkgver"
+options="!check"
+
+build() {
+	cmake -B build -G Ninja \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DCMAKE_INSTALL_PREFIX=/usr \
+		-DCMAKE_SKIP_INSTALL_RPATH=ON \
+		-DRED_BUILD_TESTS=OFF
+	cmake --build build
+}
+
+package() {
+	DESTDIR="$pkgdir" cmake --install build
+}
+
+sha512sums="
+afdf882955fb9c0e5a7cf30c14c4cb22666a03f1fe74c7e1b41f321b458c75e89a6ba3a2044fc28825b5486d825765c0fb9709212afb59935782519bb6a4e5b5  red-10.4.0.tar.gz
+6b695ae2669bd6b9597feb8db05912cbe9fe7c9d3d002fb3d479c82b8fbf7273e061062c0d734cc08cb1f0bd221d5411434d7f0658de8b650a4a2ccbd3c530c1  musl-execinfo.patch
+"

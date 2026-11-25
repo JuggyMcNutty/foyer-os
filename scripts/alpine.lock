@@ -1,0 +1,6 @@
+# Pinned Alpine build/target base. Update together.
+ALPINE_BRANCH=v3.24
+ALPINE_VERSION=3.24.4
+ALPINE_ARCH=x86_64
+ALPINE_MINIROOTFS_SHA256=cdaa38cb8de3537967ee5b6c9b6cd00cc962da2b018e6eea48696bb274923012
+ALPINE_MIRROR=https://dl-cdn.alpinelinux.org/alpine

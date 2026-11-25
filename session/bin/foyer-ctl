@@ -5,7 +5,8 @@
 #
 # Groups:
 #   audio   volume/get volume/set N volume/up volume/down mute/toggle sinks sink/set NAME
-#   display mode/get mode/set WxH@R
+#           outputs output/set CARD PROFILE output/restore
+#   display modes mode/get mode/set WxH@R|auto mode/confirm mode/revert render/set WxH|native
 #   wifi    status scan connect SSID PSK
 #   bt      status devices scan pair MAC power on|off
 #   net     status
@@ -37,7 +38,7 @@ case "$GROUP:$CMD" in
 audio:volume/get)
     VOL=$(wpctl get-volume @DEFAULT_SINK@ 2>/dev/null | grep -oE '[0-9.]+' | head -1)
     [ -z "$VOL" ] && VOL=0
-    VOLINT=$(printf '%.0f' "$VOL")
+    VOLINT=$(awk -v v="$VOL" 'BEGIN { printf "%d", v * 100 + 0.5 }')
     MUTE=$(wpctl get-volume -l @DEFAULT_SINK@ 2>/dev/null | grep -oE 'MUTED' | head -1)
     [ -n "$MUTE" ] && MUTE=1 || MUTE=0
     echo "volume=$VOLINT"
@@ -63,6 +64,47 @@ audio:sinks)
           printf "%s\t%s\t%s\n", id, name, isdef }
     '
     ;;
+audio:outputs)
+    # Selectable outputs = card profiles that have a sink and are available:
+    #   card<TAB>profile<TAB>description<TAB>active(1/0)
+    pactl list cards 2>/dev/null | awk '
+        /^Card #/ { card=""; inprof=0 }
+        /^\tName: / { card=$2 }
+        /^\tProfiles:/ { inprof=1; next }
+        /^\tActive Profile: / { active[card]=substr($0, index($0, ": ")+2); inprof=0 }
+        /^\t[A-Z]/ && !/^\tProfiles:/ { if (!/^\tActive/) inprof=0 }
+        inprof && /^\t\t/ {
+            line=$0; sub(/^\t\t/, "", line)
+            name=line; sub(/: .*/, "", name)
+            if (name ~ /\+input:/ || name == "off" || name == "pro-audio" || name ~ /^input:/) next
+            if (line !~ /available: yes/) next
+            desc=substr(line, length(name) + 3); sub(/ \(sinks.*/, "", desc)
+            n++; c[n]=card; p[n]=name; d[n]=desc
+        }
+        END { for (i=1;i<=n;i++) printf "%s\t%s\t%s\t%d\n", c[i], p[i], d[i], (active[c[i]]==p[i] || index(active[c[i]], p[i] "+")==1) }
+    '
+    ;;
+audio:output/set)
+    # card profile -> switch, make its sink default, remember for next boot
+    pactl set-card-profile "$1" "$2" 2>/dev/null || { echo "FAIL"; exit 1; }
+    sleep 0.3
+    SINK=$(wpctl list audio sinks 2>/dev/null | awk -F'\t' 'NR==1 {print $1}')
+    [ -n "$SINK" ] && wpctl set-default "$SINK" 2>/dev/null
+    printf 'AUDIO_CARD=%s\nAUDIO_PROFILE=%s\n' "$1" "$2" > "$FOYER_CONF/audio.conf"
+    echo "OK"
+    ;;
+audio:output/restore)
+    # Session start: restore the saved output, else prefer HDMI over analog
+    # (laptop boards rank their speakers above HDMI).
+    if [ -r "$FOYER_CONF/audio.conf" ]; then
+        . "$FOYER_CONF/audio.conf"
+        pactl set-card-profile "$AUDIO_CARD" "$AUDIO_PROFILE" 2>/dev/null && { echo "OK restored"; exit 0; }
+    fi
+    "$0" audio outputs | awk -F'\t' '$2 ~ /^output:hdmi-stereo$/ {print $1"\t"$2; exit}' | {
+        IFS=$(printf '\t') read -r CARD PROF
+        if [ -n "$PROF" ]; then pactl set-card-profile "$CARD" "$PROF" 2>/dev/null && echo "OK hdmi"; else echo "OK unchanged"; fi
+    }
+    ;;
 audio:sink/set)
     # Set default sink by id or name
     ID=$(wpctl list audio sinks 2>/dev/null | awk -F'\t' -v want="$1" '
@@ -72,6 +114,52 @@ audio:sink/set)
     [ -n "$ID" ] && wpctl set-default "$ID" 2>/dev/null
     ;;
 # ---- display -----------------------------------------------------------
+display:modes)
+    # Modes the connected monitor reports (EDID via DRM), one per line:
+    #   connector <name> <status>
+    #   mode <WxH> [preferred]
+    for c in /sys/class/drm/card*-*; do
+        [ -r "$c/status" ] || continue
+        st=$(cat "$c/status"); n=${c##*/}; n=${n#card*-}
+        printf 'connector\t%s\t%s\n' "$n" "$st"
+        [ "$st" = connected ] || continue
+        first=1
+        # The kernel lists the preferred mode first; drop interlaced and dupes.
+        grep -v 'i$' "$c/modes" 2>/dev/null | awk '!seen[$0]++' | while read -r m; do
+            if [ $first = 1 ]; then printf 'mode\t%s\tpreferred\n' "$m"; first=0
+            else printf 'mode\t%s\n' "$m"; fi
+        done
+    done
+    ;;
+display:mode/confirm)
+    # Keep the current mode: drop the revert point.
+    rm -f "$SESSION_CONF.prev" "$SESSION_CONF.pending"
+    echo "OK"
+    ;;
+display:mode/revert)
+    if [ -f "$SESSION_CONF.prev" ]; then
+        mv "$SESSION_CONF.prev" "$SESSION_CONF"
+        rm -f "$SESSION_CONF.pending"
+        echo "OK"
+        ( sleep 1; pkill -9 -f gamescope-wl 2>/dev/null || pkill -9 -x gamescope 2>/dev/null ) >/dev/null 2>&1 &
+    else
+        echo "FAIL nothing to revert"; exit 1
+    fi
+    ;;
+display:render/set)
+    # Internal render size (UI/app) independent of output: WxH or "native"
+    M="$1"
+    [ -f "$SESSION_CONF" ] || { echo "FAIL no session.conf"; exit 1; }
+    if [ "$M" = native ] || [ -z "$M" ]; then RW=""; RH=""
+    else RW=$(echo "$M" | cut -dx -f1); RH=$(echo "$M" | cut -dx -f2); fi
+    for kv in "RENDER_WIDTH=$RW" "RENDER_HEIGHT=$RH"; do
+        k=${kv%%=*}
+        if grep -q "^$k=" "$SESSION_CONF"; then sed -i "s/^$k=.*/$kv/" "$SESSION_CONF"
+        else echo "$kv" >> "$SESSION_CONF"; fi
+    done
+    echo "OK"
+    ( sleep 1; pkill -9 -f gamescope-wl 2>/dev/null || pkill -9 -x gamescope 2>/dev/null ) >/dev/null 2>&1 &
+    ;;
 display:mode/get)
     # Current gamescope output mode from session.conf (WIDTH=/HEIGHT=/RATE=)
     if [ -r "$SESSION_CONF" ]; then
@@ -80,10 +168,22 @@ display:mode/get)
         R=$(sed -n 's/^RATE=//p' "$SESSION_CONF" | head -1)
     fi
     if [ -n "$W" ] && [ -n "$H" ]; then echo "${W}x${H}@${R:-60}"; else echo "auto"; fi
+    RW=$(sed -n 's/^RENDER_WIDTH=//p' "$SESSION_CONF" 2>/dev/null | head -1)
+    RH=$(sed -n 's/^RENDER_HEIGHT=//p' "$SESSION_CONF" 2>/dev/null | head -1)
+    if [ -n "$RW" ] && [ -n "$RH" ]; then echo "render=${RW}x${RH}"; else echo "render=native"; fi
+    if [ -f "$SESSION_CONF.pending" ]; then echo "pending=1"; fi
     ;;
 display:mode/set)
     # Rewrite WIDTH/HEIGHT/RATE in session.conf and restart the session
     M="$1"
+    if [ "$M" = auto ]; then
+        [ -f "$SESSION_CONF" ] || { echo "FAIL no session.conf"; exit 1; }
+        cp "$SESSION_CONF" "$SESSION_CONF.prev"; touch "$SESSION_CONF.pending"
+        for k in WIDTH HEIGHT RATE; do sed -i "s/^$k=.*/$k=/" "$SESSION_CONF"; done
+        echo "OK"
+        ( sleep 1; pkill -9 -f gamescope-wl 2>/dev/null || pkill -9 -x gamescope 2>/dev/null ) >/dev/null 2>&1 &
+        exit 0
+    fi
     W=$(echo "$M" | cut -dx -f1)
     H=$(echo "$M" | cut -dx -f2 | cut -d@ -f1)
     R=$(echo "$M" | cut -s -d@ -f2); [ -n "$R" ] || R=60
@@ -92,6 +192,7 @@ display:mode/set)
     esac
     if [ -f "$SESSION_CONF" ]; then
         cp "$SESSION_CONF" "$SESSION_CONF.prev"
+        touch "$SESSION_CONF.pending"   # session.sh reverts if not confirmed
         for kv in "WIDTH=$W" "HEIGHT=$H" "RATE=$R"; do
             k=${kv%%=*}
             if grep -q "^$k=" "$SESSION_CONF"; then sed -i "s/^$k=.*/$kv/" "$SESSION_CONF"

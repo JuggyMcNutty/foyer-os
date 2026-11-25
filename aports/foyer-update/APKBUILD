@@ -1,0 +1,15 @@
+# Maintainer: JuggyMcNutty <JuggyMcNutty@users.noreply.github.com>
+pkgname=foyer-update
+pkgver=3.0.0
+pkgrel=0
+pkgdesc="Update foyer-os packages from GitHub releases"
+url="https://github.com/JuggyMcNutty/foyer-os"
+arch="noarch"
+license="MIT"
+depends="curl apk-tools"
+source=""
+_src="${FOYER_OS_SRC:-/work}/session"
+
+package() {
+	install -Dm755 "$_src"/bin/foyer-update "$pkgdir"/usr/bin/foyer-update
+}

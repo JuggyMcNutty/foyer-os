@@ -1,0 +1,46 @@
+# Maintainer: JuggyMcNutty <JuggyMcNutty@users.noreply.github.com>
+# The foyer-os appliance layer: session script, system-control backend,
+# app wrappers, default config and the runtime dependency set.
+pkgname=foyer-session
+pkgver=3.0.0
+pkgrel=0
+pkgdesc="foyer-os session: gamescope + PipeWire + Foyer on tty1, foyer-ctl, app wrappers"
+url="https://github.com/JuggyMcNutty/foyer-os"
+arch="noarch"
+license="MIT"
+depends="foyer gamescope xwayland hwdata seatd seatd-openrc eudev eudev-openrc libinput-udev
+	pipewire pipewire-pulse wireplumber cmd:wpctl pulseaudio-utils
+	mesa-dri-gallium vulkan-loader
+	dbus dbus-openrc wpa_supplicant iw bluez bluez-openrc
+	busybox curl ca-certificates tzdata"
+install="$pkgname.post-install $pkgname.post-upgrade"
+source=""
+_src="${FOYER_OS_SRC:-/work}/session"
+
+package() {
+	install -Dm755 "$_src"/bin/foyer-ctl "$pkgdir"/usr/bin/foyer-ctl
+	install -Dm755 "$_src"/bin/foyer-app "$pkgdir"/usr/bin/foyer-app
+	install -Dm755 "$_src"/session.sh "$pkgdir"/etc/foyer/session.sh
+	# compat names from the htpc-* era
+	ln -s foyer-ctl "$pkgdir"/usr/bin/htpc-ctl
+	ln -s foyer-ctl "$pkgdir"/usr/bin/htpc-net
+	ln -s foyer-app "$pkgdir"/usr/bin/htpc-app
+	for a in jellyfin youtube amazon twitch iptv; do
+		ln -s foyer-app "$pkgdir"/usr/bin/htpc-$a
+	done
+	# default app URLs / playlists (config: kept on upgrade by apk)
+	for f in "$_src"/*.url "$_src"/iptv.m3u; do
+		install -Dm644 "$f" "$pkgdir"/etc/foyer/"$(basename "$f")"
+	done
+	printf '%s\n' 'Mozilla/5.0 (Linux; Tizen 2.3; SmartHub; SMART-TV) AppleWebKit/538.1 (KHTML, like Gecko) TV Safari/538.1' \
+		> "$pkgdir"/etc/foyer/smarttv-ua
+	cat > "$pkgdir"/etc/foyer/session.conf <<-CONF
+	# foyer-os display mode (written by: foyer-ctl display mode/set).
+	# Empty WIDTH/HEIGHT = monitor's preferred mode (EDID).
+	# RENDER_WIDTH/RENDER_HEIGHT = internal render size (default: output size).
+	WIDTH=
+	HEIGHT=
+	RATE=
+	CONF
+	mkdir -p "$pkgdir"/etc/foyer/art "$pkgdir"/etc/foyer/themes "$pkgdir"/etc/foyer/apps.d
+}

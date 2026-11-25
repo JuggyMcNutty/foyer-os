@@ -1,0 +1,41 @@
+# Maintainer: JuggyMcNutty <JuggyMcNutty@users.noreply.github.com>
+# Built from the foyer/ submodule of foyer-os (pinned commit).
+pkgname=foyer
+pkgver=3.0.0
+pkgrel=0
+pkgdesc="Foyer: couch-first big-picture launcher for TVs"
+url="https://github.com/JuggyMcNutty/foyer"
+arch="x86_64 aarch64"
+license="custom"
+depends="foyer-sdl3_image"
+makedepends="cmake samurai sdl3-dev sdl3_ttf-dev foyer-sdl3_image-dev libxml2-dev fmt-dev spdlog-dev libevdev-dev"
+checkdepends="font-dejavu"
+source=""
+# FOYER_SRC is set by scripts/build-apks.sh to the submodule checkout.
+_src="${FOYER_SRC:-/work/foyer}"
+
+prepare() {
+	default_prepare
+	rm -rf "$srcdir/foyer" && cp -a "$_src" "$srcdir/foyer"
+	rm -rf "$srcdir/foyer/build"
+}
+
+build() {
+	cd "$srcdir/foyer"
+	cmake -B build -G Ninja \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DCMAKE_INSTALL_PREFIX=/usr \
+		-DFOYER_EVDEV=ON
+	cmake --build build
+}
+
+check() {
+	cd "$srcdir/foyer"
+	SDL_VIDEO_DRIVER=dummy ./build/tests/foyer_tests
+}
+
+package() {
+	cd "$srcdir/foyer"
+	DESTDIR="$pkgdir" cmake --install build
+	install -Dm644 README.md "$pkgdir"/usr/share/doc/foyer/README.md
+}

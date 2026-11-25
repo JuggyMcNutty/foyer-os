@@ -1,0 +1,21 @@
+#!/bin/sh
+# Wire the appliance session (OpenRC): services + tty1 autostart.
+for s in udev udev-trigger; do rc-update add $s sysinit >/dev/null 2>&1; done
+for s in seatd dbus bluetooth; do rc-update add $s default >/dev/null 2>&1; done
+# PipeWire runs inside the session, not as a system service
+rc-update del pipewire default >/dev/null 2>&1
+rc-update del pipewire-pulse default >/dev/null 2>&1
+if [ -f /etc/inittab ]; then
+    if grep -q '^tty1::' /etc/inittab; then
+        sed -i 's|^tty1::.*|tty1::respawn:/bin/sh /etc/foyer/session.sh|' /etc/inittab
+    else
+        echo 'tty1::respawn:/bin/sh /etc/foyer/session.sh' >> /etc/inittab
+    fi
+fi
+# legacy /etc/htpc -> /etc/foyer (pre-rename boxes)
+if [ -d /etc/htpc ] && [ ! -L /etc/htpc ]; then
+    cp -an /etc/htpc/. /etc/foyer/ 2>/dev/null
+    rm -rf /etc/htpc
+fi
+[ -e /etc/htpc ] || ln -s foyer /etc/htpc
+exit 0

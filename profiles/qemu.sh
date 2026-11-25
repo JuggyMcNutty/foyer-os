@@ -1,0 +1,19 @@
+# QEMU/KVM test profile (virtio GPU, BIOS+UEFI). Used by CI boot tests.
+PROFILE_TITLE="QEMU test VM"
+BASE=alpine
+ARCH=x86_64
+HOSTNAME=foyer-qemu
+KERNEL=kernel-virt
+FIRMWARE=""
+GPU=gpu-generic
+NET="net-ethernet"
+WIFI=no
+BT=no
+BOOT=both
+DISK=vda
+IMG_SIZE=4G
+RENDER_MAX=1280x720
+ASSET_BUDGET_MB=64
+SWAP_MB=0
+APPS="jellyfin youtube"
+EXTRA_PKGS=""

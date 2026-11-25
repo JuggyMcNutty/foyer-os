@@ -1,0 +1,45 @@
+# Maintainer: JuggyMcNutty <JuggyMcNutty@users.noreply.github.com>
+# Official Jellyfin desktop client (Qt6 + libmpv), TV mode. Foyer's Jellyfin tile.
+pkgname=foyer-jellyfin-desktop
+_pkgname=jellyfin-desktop
+pkgver=2.1.0_pre2
+_tag=v2.1.0-pre2
+_mpvqt=2ebbd38bf65d01be9c55d673ecd43c8bb9a6fc8e
+pkgrel=0
+pkgdesc="Jellyfin desktop client (Qt6 + mpv), built for Foyer"
+url="https://github.com/jellyfin/jellyfin-desktop"
+arch="x86_64 aarch64"
+license="GPL-2.0-or-later"
+depends="qt6-qtwebengine qt6-qtwebchannel qt6-qtdeclarative mpv-libs"
+makedepends="cmake samurai qt6-qtbase-dev qt6-qtbase-private-dev qt6-qtwebengine-dev qt6-qtwebchannel-dev
+	qt6-qtdeclarative-dev qt6-qtdeclarative-private-dev mpv-dev sdl2-dev libcec-dev python3 extra-cmake-modules"
+provides="jellyfin-desktop=$pkgver-r$pkgrel"
+source="$_pkgname-$_tag.tar.gz::https://github.com/jellyfin/jellyfin-desktop/archive/refs/tags/$_tag.tar.gz
+	mpvqt-$_mpvqt.tar.gz::https://invent.kde.org/libraries/mpvqt/-/archive/$_mpvqt/mpvqt-$_mpvqt.tar.gz"
+builddir="$srcdir/$_pkgname-${_tag#v}"
+options="!check"
+
+prepare() {
+	default_prepare
+	rmdir external/mpvqt 2>/dev/null || rm -rf external/mpvqt
+	mv "$srcdir/mpvqt-$_mpvqt" external/mpvqt
+}
+
+build() {
+	cmake -B build -G Ninja \
+		-DCMAKE_BUILD_TYPE=Release \
+		-DCMAKE_INSTALL_PREFIX=/usr \
+		-DUSE_STATIC_MPVQT=ON \
+		-DBUILD_TESTING=OFF \
+		-DCHECK_FOR_UPDATES=OFF
+	cmake --build build
+}
+
+package() {
+	DESTDIR="$pkgdir" cmake --install build
+}
+
+sha512sums="
+7769952d9cafb32f49537dce27c7d9fd390640e4167e6c459384b640cbfbf76a8a925aa648740a6fb04df2ae68699313f647e83d3838c086b3d2cf130b8b0825  jellyfin-desktop-v2.1.0-pre2.tar.gz
+27a0a6932747827db433f6926e26a38d25fa96f99d8d7fd56929557e605f692de47600392a54bd4a554ce7677e85ef50ebd83763b58e047d334f19aab7d6ff27  mpvqt-2ebbd38bf65d01be9c55d673ecd43c8bb9a6fc8e.tar.gz
+"
