@@ -357,7 +357,7 @@ Phase E
       vs systemd/NetworkManager)
 - [x] **E4** `BASE=debian` in profiles + per-base package maps; `make-image.sh` Debian path;
       `provision.sh` on stock trixie
-- [ ] **E5** CI matrix (alpine/debian × profiles), QEMU boot both; release attaches .apk + .deb +
+- [x] **E5** CI matrix (alpine/debian × profiles), QEMU boot both; release attaches .apk + .deb +
       tarball + images
 
 ## Verification

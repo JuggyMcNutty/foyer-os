@@ -4,7 +4,7 @@
 # APKs are unsigned release assets, installed with --allow-untrusted.
 set -eu
 REPO="${FOYER_REPO:-JuggyMcNutty/foyer-os}"
-ARCH=$(apk --print-arch)
+ARCH=$(apk --print-arch 2>/dev/null || uname -m)
 CHECK=0
 [ "${1:-}" = "--check" ] && { CHECK=1; shift; }
 TAG="${1:-latest}"
@@ -14,10 +14,21 @@ rel=$(printf '%s' "$json" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head 
 cur=$(cat /etc/foyer/release 2>/dev/null || echo none)
 echo "installed: $cur   available: $rel"
 [ $CHECK = 1 ] && { [ "$rel" != "$cur" ] && exit 10 || exit 0; }
-urls=$(printf '%s' "$json" | sed -n 's/.*"browser_download_url": *"\([^"]*'"$ARCH"'[^"]*\.apk\)".*/\1/p')
-[ -n "$urls" ] || { echo "foyer-update: no $ARCH apks in release $rel" >&2; exit 1; }
+# Alpine: *.apk (built for x86_64; names carry no arch). Debian: *_<arch>.deb / *_all.deb
+if command -v apk >/dev/null 2>&1; then
+    urls=$(printf '%s' "$json" | tr ',' '\n' | sed -n 's/.*"browser_download_url": *"\([^"]*\.apk\)".*/\1/p' | grep -v -- '-dev-')
+    [ "$ARCH" = x86_64 ] || { echo "foyer-update: releases are x86_64 only" >&2; exit 1; }
+else
+    DARCH=$(dpkg --print-architecture)
+    urls=$(printf '%s' "$json" | tr ',' '\n' | sed -n 's/.*"browser_download_url": *"\([^"]*_\('"$DARCH"'\|all\)\.deb\)".*/\1/p')
+fi
+[ -n "$urls" ] || { echo "foyer-update: no packages for this system in release $rel" >&2; exit 1; }
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 for u in $urls; do echo "fetch $(basename "$u")"; curl -fsSL -o "$tmp/$(basename "$u")" "$u"; done
-apk add --allow-untrusted --upgrade "$tmp"/*.apk
+if command -v apk >/dev/null 2>&1; then
+    apk add --allow-untrusted --upgrade "$tmp"/*.apk
+else
+    DEBIAN_FRONTEND=noninteractive apt-get install -y "$tmp"/*.deb
+fi
 echo "$rel" > /etc/foyer/release
 echo "foyer-update: now at $rel (restart the session or reboot to apply)"

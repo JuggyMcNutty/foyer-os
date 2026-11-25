@@ -1,7 +1,7 @@
 # Maintainer: JuggyMcNutty <JuggyMcNutty@users.noreply.github.com>
 pkgname=foyer-update
 pkgver=3.0.0
-pkgrel=0
+pkgrel=1
 pkgdesc="Update foyer-os packages from GitHub releases"
 url="https://github.com/JuggyMcNutty/foyer-os"
 arch="noarch"
