@@ -11,7 +11,7 @@ Repurposed **Lenovo ideapad 120S-11IAP laptop/tablet motherboard** (model 81A4) 
 - **CPU:** Intel Celeron N3350 — 2 cores / 2 threads, 1.10→2.40 GHz, SSE4.2 only (**no AVX**)
 - **RAM:** 2 GB DDR4 (soldered, fixed) + 3.5 GB swap on eMMC
 - **Storage:** 32 GB eMMC (24.5 GB usable for OS) — empty 2.5" SATA port, empty microSD slot
-- **GPU:** Intel HD Graphics 500 (i915, Gen 9) — **HDMI out directly on the motherboard**, EDID shows a **Toshiba 4K TV** but the HDMI 1.4 link caps at **1080p60 max** (TV upscales) — no HDR
+- **GPU:** Intel HD Graphics 500 (i915, Gen 9) — **HDMI out directly on the motherboard**, connected to a **Toshiba 4K TV**. The connector reports modes from 640x480 up to 3840x2160 / 4096x2160 (EDID, `foyer-ctl display modes`); preferred mode is 1920x1080@60. HDMI 1.4 means 4K is limited to 30 Hz — no HDR
 - **Audio:** Realtek ALC269VC (3.5mm speaker/HP + mics) + HDMI/DP audio
 - **Network:** no Wi-Fi; USB-C Gigabit Ethernet (Realtek r8152 adapter) — **plugged directly into the board's USB port** (the temporary Nintendo hub has been removed)
 - **Boot:** UEFI, GRUB, Alpine `linux-lts` 6.18.65
@@ -54,7 +54,7 @@ The DMI strings are the **donor laptop's** (Lenovo ideapad 120S-11IAP, a 12" 2-i
 - DMC firmware v1.7 loaded (from `linux-firmware-i915`)
 - Vulkan via ANV (`mesa-vulkan-intel`), OpenGL 4.3/4.5 — fine for Gamescope + compositing
 - **Display output: `card1-HDMI-A-1`** — HDMI cable plugs **directly into the motherboard**; no dock or adapter in the chain. Display: **Toshiba 4K TV** ("TSB - TOSHIBA-TV" per EDID, with colorimetry block)
-  - EDID modes: up to **1920x1080 (p)** only — HDMI 1.4b link → **1080p60 ceiling**, the TV upscales to its 4K panel; no 4K60, no HDR on this link
+  - EDID modes (re-checked 2026-11-24 via /sys/class/drm): 1920x1080 (preferred), 4096x2160, 3840x2160, 1280x720, 1024x768, 800x600, 720x576, 720x480, 640x480 — 4K only at 24/30 Hz over HDMI 1.4; no HDR
   - 720p and lower also available if the TV misbehaves
 - Internal eDP panel (from the laptop) is not present: `failed to retrieve link info, disabling eDP` — expected for the conversion
 - `renderD128` + `card1` (i915); a `simpledrm` framebuffer is also created early in boot (harmless)
@@ -141,7 +141,7 @@ No Wi-Fi/BT radios. No USB-A ports visible on the board.
 1. **2 GB RAM** — one heavy app at a time; prefer mpv/web over multiple Electron apps; eMMC swap is a safety net, not a feature
 2. **No AVX** — fine in practice (ffmpeg/chromium/mpv handle it) but relevant if picking builds or codecs
 3. **32 GB eMMC** — OS + apps only; media lives on the LAN (Jellyfin), not locally; watch eMMC write life
-4. **1080p60 / no HDR** — tune everything for 1080p (display is a 4K panel but the HDMI 1.4 link caps it; gamescope runs `-W 1920 -H 1080 -r 60`)
+4. **Any resolution, but render at ≤1080p** — Foyer lays out in dp units from 480p to 4K and gamescope uses the TV's preferred mode by default (Settings → Display lists every EDID mode). On this weak GPU the profile (`profiles/ideapad-120s.sh`) sets `RENDER_MAX=1920x1080`, so the UI/apps render at 1080p and gamescope upscales if the output is 4K. No HDR.
 5. **musl/Alpine** — glibc-only binaries (AppImages, Steam) need extra work; prefer packaged software
 
 ## Session-stack gotchas (solved — do not regress)
