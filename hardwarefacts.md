@@ -1,167 +1,132 @@
 # HTPC Mini PC — Hardware Facts
 
-> Source of truth for the box at `192.168.1.123` (ssh alias: `htpc`).
-> Verified via SSH on 2026-11-24 (fresh install, nothing installed yet beyond base).
+> Source of truth for the box at `192.168.1.123` (ssh alias: `htpc`, DNS: `streamyboi`).
+> Verified via SSH on 2026-11-26 (fresh foyer-os image install, first boot).
 > Re-verify with the commands in the [Verification](#verification) section before trusting stale values.
+>
+> The previous box (ideapad 120S, N3350) is documented in
+> [hardwarefacts-ideapad-120s.md](hardwarefacts-ideapad-120s.md).
 
 ## TL;DR
 
-Repurposed **Lenovo ideapad 120S-11IAP laptop/tablet motherboard** (model 81A4) in a mini-PC enclosure — no battery, no internal screen, AC-powered, headless via HDMI.
+Repurposed **GEOMARK Geobook 240** 14" 2-in-1 laptop motherboard in a mini-PC enclosure — no battery, no internal screen, AC-powered, headless via HDMI.
 
-- **CPU:** Intel Celeron N3350 — 2 cores / 2 threads, 1.10→2.40 GHz, SSE4.2 only (**no AVX**)
-- **RAM:** 2 GB DDR4 (soldered, fixed) + 3.5 GB swap on eMMC
-- **Storage:** 32 GB eMMC (24.5 GB usable for OS) — empty 2.5" SATA port, empty microSD slot
-- **GPU:** Intel HD Graphics 500 (i915, Gen 9) — **HDMI out directly on the motherboard**, connected to a **Toshiba 4K TV**. The connector reports modes from 640x480 up to 3840x2160 / 4096x2160 (EDID, `foyer-ctl display modes`); preferred mode is 1920x1080@60. HDMI 1.4 means 4K is limited to 30 Hz — no HDR
-- **Audio:** Realtek ALC269VC (3.5mm speaker/HP + mics) + HDMI/DP audio
-- **Network:** no Wi-Fi; USB-C Gigabit Ethernet (Realtek r8152 adapter) — **plugged directly into the board's USB port** (the temporary Nintendo hub has been removed)
-- **Boot:** UEFI, GRUB, Alpine `linux-lts` 6.18.65
+- **CPU:** Intel Pentium Silver N5030 — 4 cores / 4 threads, 1.10→3.16 GHz, SSE4.2 only (**no AVX**)
+- **RAM:** 8 GB DDR4 (7.5 GiB visible)
+- **Storage:** 128 GB SATA disk (**111.8 GiB usable**) in a **PNY USB3.0-to-SATA dock** — the disk is external USB, not internal
+- **GPU:** Intel UHD Graphics 605 (i915, Gemini Lake Gen 9.5) — **HDMI out on the motherboard**, currently a **dummy plug** (emulates an AOC 28E850 HDR, 4K60). HDMI on Gemini Lake is **1.4**: 4K60 only in 4:2:0, 4:4:4 tops out at 4K30, **no HDR**
+- **Audio:** HDA controller with **HDMI/DP codec only** (no analog) — digital stereo to the TV
+- **Network:** Realtek RTL8153 USB Gigabit Ethernet in the dock — **can fail to come up at boot; a reboot fixes it**
+- **Boot:** UEFI, systemd-boot, Alpine `linux-lts` 6.18.65
 
 ## Identity / DMI
 
-The DMI strings are the **donor laptop's** (Lenovo ideapad 120S-11IAP, a 12" 2-in-1 from 2018) — the board was converted into a mini-PC chassis.
-
 | Field | Value |
 |---|---|
-| Product | Lenovo ideapad 120S-11IAP |
-| Internal product name | `81A4` |
-| SKU | `LENOVO_MT_81A4_BU_idea_FM_ideapad120S-11IAP` |
-| Serial (product/board/chassis) | `YD04NV8T` |
-| Board | `LNVNB161216` (rev `SDK0J91216 WIN`) |
-| BIOS | LENOVO `6GCN26WW`, dated 03/08/2018 |
-| Chassis type | 10 (Other) |
-| UUID | `505bc2c0-8d81-2018-0614-122240000000` |
+| Product | GeoBook 240 |
+| Board | `EM_IG218_200B_ENE_TI_V2.0` |
+| Serial | `1036999892994` |
 
 ## CPU
 
-- **Intel(R) Celeron(R) CPU N3350** @ 1.10 GHz base — Gemini Lake, 14 nm, 6 W TDP
-- 2 cores / 2 threads (no hyperthreading)
-- Burst up to ~2.4 GHz (`nonstop_tsc`, `tsc_known_freq` present — good for timers)
-- SIMD ceiling: **SSE4.2**. No AVX / AVX2 / AVX-512 → some optimized codec paths and prebuilt binaries fall back to scalar/SSE; ffmpeg/chromium/mpv all work fine
-- AES-NI + SHA-NI present (TLS is fine)
-- VT-x + EPT (vmx/ept) — virtualization available if ever needed
-- Passive-cool design; ~38 °C at idle (coretemp)
+- **Intel(R) Pentium(R) Silver N5030** — Gemini Lake, 14 nm, 6 W TDP
+- 4 cores / 4 threads (no hyperthreading), 1.10 GHz base, burst ~3.16 GHz
+- SIMD ceiling: **SSE4.2**. No AVX / AVX2 / FMA — same class as the N3350
+- Passively cooled (laptop-board heatsink); ~36–41 °C at idle (coretemp TCPU)
 
 ## RAM
 
-- **2 GB total** (~1.8 GiB visible), DDR4, soldered — no upgrade path
-- 3.5 GB swap on `/dev/mmcblk0p2` (eMMC-backed, priority −2) — works, but eMMC swap is slow; keep resident set small
-- Practical budget: base OS ~150 MB, Gamescope ~100–200 MB, PipeWire ~50 MB → **~1 GB for one app at a time**. Don't stack two Electron/browser-class apps.
+- **8 GB DDR4** (~7.5 GiB visible)
+- 2 GB swapfile (`/swapfile`, created on first boot from the profile's `SWAP_MB`)
+- Plenty of headroom for Foyer + one heavy app; can stack a browser-class app
 
 ## Graphics
 
-- **Intel HD Graphics 500** (PCI `0000:00:02.0`, device `8086:5a85`)
-- i915 driver identifies it as "broxton" Gen 9, stepping C0 (Gemini Lake iGPU)
-- DMC firmware v1.7 loaded (from `linux-firmware-i915`)
-- Vulkan via ANV (`mesa-vulkan-intel`), OpenGL 4.3/4.5 — fine for Gamescope + compositing
-- **Display output: `card1-HDMI-A-1`** — HDMI cable plugs **directly into the motherboard**; no dock or adapter in the chain. Display: **Toshiba 4K TV** ("TSB - TOSHIBA-TV" per EDID, with colorimetry block)
-  - EDID modes (re-checked 2026-11-24 via /sys/class/drm): 1920x1080 (preferred), 4096x2160, 3840x2160, 1280x720, 1024x768, 800x600, 720x576, 720x480, 640x480 — 4K only at 24/30 Hz over HDMI 1.4; no HDR
-  - 720p and lower also available if the TV misbehaves
-- Internal eDP panel (from the laptop) is not present: `failed to retrieve link info, disabling eDP` — expected for the conversion
-- `renderD128` + `card1` (i915); a `simpledrm` framebuffer is also created early in boot (harmless)
+- **Intel UHD Graphics 605** (PCI `0000:00:02.0`, device `8086:3184`)
+- i915 identifies it as **geminilake** (display version 10.00, Gen 9.5), DMC firmware v1.4
+- `drm: Unknown revision 0x06` at boot is a harmless GLK message
+- Connectors: **HDMI-A-1** (in use), HDMI-A-2 (untested), DP-1 (eDP panel port — no panel)
+- **HDMI link is 1.4** (Gemini Lake SoC): 4K60 requires 4:2:0, 4:4:4 is 4K30 max, no HDR
+  metadata. The dummy plug's EDID (AOC28E850.HDR) advertises 3840x2160@60 native with
+  tmds=340 MHz + SCDC; the session outputs 4K60 into it fine.
+- Vulkan via ANV (`mesa-vulkan-intel`) — gamescope composites fine at 4K
+- **VAAPI: must use the `i965` driver** (profile `VA_DRIVER=i965` →
+  `/etc/foyer/env.d/libva.conf`, written by make-image.sh / provision.sh). The `iHD`
+  (intel-media-driver 26.2.1) is **broken on Gemini Lake just like on Apollo Lake**:
+  4K HEVC 10-bit (5 s clip) decodes in **190 s with iHD vs 3.8 s with i965**
+  (~1.3× realtime; software manages ~1.5×). Measured 2026-11-26 with
+  `mpv --vo=null --untimed --hwdec=vaapi-copy`.
 
 ## Audio
 
-- PCI `0000:00:0e.0` — Intel HDA controller, bound to i915 (HDMI audio)
-- Codec: **Realtek ALC269VC**
-  - line-out pin 0x14 (type: speaker), headphone 0x15, internal mic 0x12, mic 0x18
-  - In practice: 3.5mm jack(s) on the back of the box for analog out; HDMI/DP audio for the TV
-- HDMI/DP audio: three PCM endpoints registered (pcm 3, 7, 8) — PipeWire should surface HDMI + analog profiles
-- No HDMI ARC/eARC (HDMI 1.4) — audio goes to the TV, nothing back
+- PCI `0000:00:0e.0` — Intel HDA controller (`8086:3198`)
+- **HDMI/DP codec only** (pcm 3/7/8) — no analog codec on this board; audio goes to the TV
+- **Audio gotcha (solved):** the kernel's SOF driver (`sof-audio-pci-intel-apl`) claims
+  the controller and, without the `sof-firmware` package, creates **no soundcards at all**.
+  The image forces the legacy HDA driver: `/etc/modprobe.d/foyer-audio.conf` with
+  `options snd-intel-dspcfg dsp_driver=1` (note: `0` = auto, which picks SOF).
+- PipeWire sink: `Built-in Audio Digital Stereo (HDMI)`, routed by `foyer-ctl audio output/restore`
 
 ## Storage
 
 | Device | What | Layout / size | Notes |
 |---|---|---|---|
-| `/dev/mmcblk0` | 32 GB eMMC module, model `DF4032` (Samsung, CID `45010044…`) | p1: 511 MB FAT `/boot/efi` · p2: 3.5 GB swap · p3: 24.5 GB ext4 `/` | eMMC wear: prefer tmpfs for scratch (already: `/tmp`, `/run`), avoid heavy local logging |
-| (none) | — | — | the generic USB mass-storage device was on the (now-removed) Nintendo hub; `/dev/sda` no longer appears |
-| SATA | AHCI controller `0000:00:12.0` | **empty** | 2.5" SATA bay available for a future SSD |
-| microSD | SDHCI controller `0000:00:1c.0` (`8086:5acc`) | no card | usable for media if needed |
+| `/dev/sda` | 128 GB SATA disk in a **PNY USB3.0-to-SATA dock** (154b:8001), USB bus 2 | p1: 256 MB FAT `/boot` (FOYER-ESP) · p2: 111.5 GB ext4 `/` | Grows to the disk on first boot (foyer-firstboot) |
+| (none) | — | — | the board's native SATA (00:12.0) has no drive; SD slot (00:1f.1) has no card |
 
 ## I/O & USB layout
 
-- **HDMI:** direct to the motherboard (native port on the board) → TV
-- **Power:** mains directly to the board (no battery in the conversion)
-- **USB:** internal xHCI, bus 1 (SS-capable, USB-C Gen 1 5 Gbps) + bus 2 (HS)
-
-### Permanent / target setup
-
-- **Realtek USB-C Gigabit LAN adapter** (`r8152`) — plugged **directly** into the board's USB port → `eth0`
-- 2.4 GHz wireless receivers ("Compx", "Telink" — keyboard/mouse/remotes) plugged directly
-
-### Removed
-
-- **Nintendo CRD-001 USB-C hub/dock** (id `057e:200c`) — **removed**. The r8152 adapter and the 2.4 GHz receivers now plug **directly** into the board's USB port. (The hub's generic mass-storage device is gone with it.)
-
-No Wi-Fi/BT radios. No USB-A ports visible on the board.
-
-## Power & thermals
-
-- **Mains only**: `/sys/class/power_supply/ADP1` (`type=Mains`) — no battery in the conversion
-- coretemp on `hwmon0` (38 °C at idle, 2026-11-24)
-- 6 W-class SoC → quiet, low-draw in a TV stand; no fans to worry about (passive)
+- **HDMI:** motherboard port → TV (dummy plug during bring-up). Board exposes HDMI-A-1 + HDMI-A-2 in sysfs
+- **Power:** mains directly (no battery)
+- **USB bus 2 (xHCI 3.0):** PNY SATA dock (disk) + Realtek RTL8153 USB Ethernet (`eth0`)
+- **USB bus 1 (xHCI 2.0):** Realtek Bluetooth radio (`0bda:c821`) — **broken dongle, stuck in a USB reset loop** (`hci0: command 0xfc61 tx timeout`); unplug it
+- No Wi-Fi/BT on the board itself (BT only via the dongle)
 
 ## Network
 
-- `eth0` = Realtek r8152 over USB, MAC `98:fc:84:e2:0a:4f`
-- **DHCP on 192.168.1.0/24 → 192.168.1.123**; IPv6 SLAAC (`fd11:c69c:e3d4::/64`)
-- Managed by **ifupdown-ng** (`/etc/network/interfaces`)
-- Router: `192.168.1.1` (assumed; verify if it matters)
+- `eth0` = Realtek RTL8153 over USB, DHCP on 192.168.1.0/24 → currently `192.168.1.123`
+- Managed by ifupdown-ng; `foyer-net.start` DHCP-configures every wired NIC and retries
+  for 60 s (USB NICs can enumerate late)
+- **Gotcha:** the r8153 sometimes does not come up at boot (no IP, "No route to host");
+  a reboot brings it back. The 60 s retry in foyer-net.start covers the late-enumeration
+  case; a fully dead adapter still needs a reboot.
 
 ## Kernel & boot
 
-- `linux-lts` **6.18.65-0-lts** (Alpine 3.24.4)
-- UEFI boot via `grub-efi`, root on `/dev/mmcblk0p3` (`UUID=126ea173-d64c-476e-9c1e-49ebab21679f`)
-- Boot args: `ro quiet rootfstype=ext4 modules=sd-mod,usb-storage,ext4`
-- Firmware packages installed: `linux-firmware-intel`, `-i915`, `-lenovo`, `-rtl_nic`, `-dell`, `-hp`
-
-## Software baseline (fresh install, 2026-11-24)
-
-> **Note:** this was the state at fresh install. The box now runs the full HTPC stack
-> (gamescope + PipeWire + big-launcher v2, ~470 packages). See AGENTS.md for the current state.
-
-- **Alpine 3.24.4**, OpenRC init (BusyBox), musl
-- 70 packages total: base system + `openssh-server`, `ntpd`, `acpid`, `crond`, `htop`, `lsof`, `tmux`, `doas`
-- Running services: `sshd`, `ntpd`, `acpid`, `crond`
-- **No GUI, no Wayland, no Mesa/Vulkan, no PipeWire yet**
-- SSH: key auth set up from the dev machine (see AGENTS.md); root password auth still active (password not stored in git)
-
-### Useful Alpine repo facts (v3.24, x86_64) — all packaged, no manual builds
-
-- `gamescope` (community), `pipewire` + `pipewire-openrc` + `pipewire-pulse-openrc` (community)
-- `mesa`, `mesa-vulkan-intel` (ANV), `vulkan-tools`, `libva`, `libva-intel-driver` (main)
-- `mpv`, `mpv-mpris`, `mpvpaper`, `yt-dlp`, `ffmpeg` (community)
-- `chromium`, `firefox` (community), `weston` (main, fallback compositor)
-- `jellyfin` + `jellyfin-openrc` + `jellyfin-tui` + `jellyfin-mpv-shim` (community — local server if ever wanted)
-- `retroarch` + joypad autoconfig (community)
-- `moonlight-qt` (community — if a gaming PC ever joins the LAN)
-- **NOT packaged:** `steam` client (only `steam-devices`), `red` (the YouTube/Electron app — would need AppImage + glibc compat on musl), Kodi is packaged but ruled out by user
+- `linux-lts` **6.18.65-0-lts** (Alpine 3.24), UEFI boot via systemd-boot on FOYER-ESP
+- Boot args: `root=LABEL=foyer-root rootfstype=ext4 modules=ext4 quiet loglevel=3 console=tty0`
+- **RTC is not set** (no working battery?): first boot shows Jan 1 2012 until chrony steps
+  the clock (~15 years off). Harmless after the first sync.
+- UEFI boots the USB-docked disk fine (no Secure Boot issue seen)
 
 ## Constraints to design around
 
-1. **2 GB RAM** — one heavy app at a time; prefer mpv/web over multiple Electron apps; eMMC swap is a safety net, not a feature
-2. **No AVX** — fine in practice (ffmpeg/chromium/mpv handle it) but relevant if picking builds or codecs
-3. **32 GB eMMC** — OS + apps only; media lives on the LAN (Jellyfin), not locally; watch eMMC write life
-4. **Any resolution, but render at ≤1080p** — Foyer lays out in dp units from 480p to 4K and gamescope uses the TV's preferred mode by default (Settings → Display lists every EDID mode). On this weak GPU the profile (`profiles/ideapad-120s.sh`) sets `RENDER_MAX=1920x1080`, so the UI/apps render at 1080p and gamescope upscales if the output is 4K. No HDR.
-5. **musl/Alpine** — glibc-only binaries (AppImages, Steam) need extra work; prefer packaged software
+1. **HDMI 1.4 is the ceiling** — 4K60 only in 4:2:0, no 4:4:4 above 30 Hz, no HDR. The
+   decode side is strong (4K HEVC 10-bit at 1.3× realtime with i965); the link is not.
+   If 4K60 4:4:4 + HDR is the goal, this SoC family can't deliver it over HDMI.
+2. **No AVX** — fine in practice (ffmpeg/mpv/chromium handle it)
+3. **Disk is external USB** — the dock is single-point-of-failure; the board's internal
+   SATA/SD are empty if an internal disk is ever wanted
+4. **Render at native** (profile `RENDER_MAX=native`): 8 GB RAM + UHD 605 handle 4K UI
+   rendering; gamescope outputs 4K60
+5. **musl/Alpine** — glibc-only binaries (AppImages, Steam) need extra work
 
-## Session-stack gotchas (solved — do not regress)
+## Session-stack gotchas (geobook-specific)
 
-- **seatd is mandatory** for gamescope/wlroots (no systemd-logind on Alpine); package `seatd`, openrc service, `/run/seatd.sock`
-- **eudev is mandatory** — the box shipped with busybox mdev; libinput/wlroots can't enumerate input without `eudev` + `udev-trigger` (sysinit runlevel)
-- **Xwayland is mandatory** — gamescope 3.16 spawns Xwayland even for wayland-native clients; without it gamescope **segfaults** (`segfault at 90`) with a confusing `Cannot find Xwayland binary` error first
-- `hwdata` package fixes the `pnp.ids` warning; `drmModeAddFB2WithModifiers: Invalid argument` spam is a harmless fallback (no DRM modifiers on this iGPU)
-- Red build: `-DCMAKE_SKIP_INSTALL_RPATH=ON` (cmake RPATH rewrite chokes on musl binaries), `-DRED_BUILD_TESTS=OFF`
-- **gamescope ignores SIGTERM** — restart the session with `kill -9 <gamescope-wl pid>` (inittab respawns session.sh)
-- **gamescope Wayland socket is `gamescope-0`** (in `$XDG_RUNTIME_DIR`), not `wayland-*`. Clients (including the v2 quick-menu overlay) use `WAYLAND_DISPLAY=gamescope-0`.
-- **Quick-menu overlay works** via the `GAMESCOPE_EXTERNAL_OVERLAY=1` env var on the overlay client — gamescope composites it on top of the running app (strategy A from the plan).
-- **No CEC**: the HD 500 iGPU does not expose a CEC adapter (no `/dev/cec*`, no `/sys/class/cec`). The `libcec` apk is for a Pulse-Eight USB adapter the box lacks. CEC is blocked until a USB CEC adapter is added.
+- **SOF vs HDA audio:** `options snd-intel-dspcfg dsp_driver=1` in
+  `/etc/modprobe.d/foyer-audio.conf` (shipped in the image). Without it the SOF driver
+  claims the HDA controller and no soundcards appear.
+- **VAAPI driver:** i965, not iHD (see Graphics). `/etc/foyer/env.d/libva.conf`
+  (`export LIBVA_DRIVER_NAME=i965`).
+- **USB Ethernet flake:** reboot to recover (see Network).
+- **BT dongle:** unplug the broken Realtek c821 dongle (USB reset loop spam).
 
 ## Verification
 
 ```sh
-ssh htpc 'grep "model name" /proc/cpuinfo; free -h; cat /sys/class/dmi/id/product_name /sys/class/dmi/id/product_serial'
-ssh htpc 'for c in /sys/class/drm/card1-*/; do echo "$c $(cat $c/status) $(cat $c/modes|head -1)"; done'
-ssh htpc 'cat /sys/block/mmcblk0/size; swapon --show; df -h /; ip -brief a'
-ssh htpc 'apk info -v | wc -l; rc-status'
-ssh htpc 'cat /sys/class/hwmon/hwmon0/temp1_input'
+ssh htpc 'grep "model name" /proc/cpuinfo; nproc; free -h; cat /sys/class/dmi/id/product_name'
+ssh htpc 'for c in /sys/class/drm/card1-*/; do echo "$c $(cat $c/status)"; done; foyer-ctl display native'
+ssh htpc 'lsblk; swapon; cat /proc/swaps'
+ssh htpc 'cat /proc/asound/cards; XDG_RUNTIME_DIR=/run/foyer wpctl status | grep -A3 Sinks'
+ssh htpc 'cat /sys/class/thermal/thermal_zone*/temp'
 ```

@@ -43,6 +43,7 @@ export ALPINE_ROOT="${ALPINE_ROOT:-$REPO/.cache/alpine-imgtools}"
 exec "$HERE/alpine-env.sh" env \
     PROFILE_NAME="$PROFILE_NAME" PKGS="$PKGS" ARCH="$ARCH" BOOT="$BOOT" DISK="$DISK" IMG_SIZE="$IMG_SIZE" \
     HOSTNAME_="$HOSTNAME" SWAP_MB="$SWAP_MB" VERSION="$VERSION" ASSET_BUDGET_MB="$ASSET_BUDGET_MB" \
+    VA_DRIVER="$VA_DRIVER" \
     ALPINE_BRANCH="$ALPINE_BRANCH" ALPINE_MIRROR="$ALPINE_MIRROR" KERNEL_FLAVOR="$(case $KERNEL in kernel-virt) echo virt;; *) echo lts;; esac)" \
     OUTREL="${OUTDIR#"$REPO"/}" \
     /bin/sh -eu -s <<'INNER'
@@ -88,16 +89,26 @@ cat > "$ROOTFS/etc/network/interfaces" <<NET
 auto lo
 iface lo inet loopback
 NET
-# DHCP on every wired NIC present at boot (names differ per board)
+# DHCP on every wired NIC (names differ per board). USB NICs can enumerate
+# after networking starts (a reboot otherwise brings no network), so
+# re-check for 60 s in the background.
 cat > "$ROOTFS/etc/local.d/foyer-net.start" <<'NET'
 #!/bin/sh
-for n in /sys/class/net/*; do
-    i=${n##*/}
-    case "$i" in lo|wl*|docker*|veth*) continue ;; esac
-    [ -d "$n/wireless" ] && continue
-    grep -q "iface $i" /etc/network/interfaces || printf 'auto %s\niface %s inet dhcp\n' "$i" "$i" >> /etc/network/interfaces
-done
-rc-service networking restart >/dev/null 2>&1 || true
+setup() {
+    changed=0
+    for n in /sys/class/net/*; do
+        i=${n##*/}
+        case "$i" in lo|wl*|docker*|veth*) continue ;; esac
+        [ -d "$n/wireless" ] && continue
+        if ! grep -q "iface $i" /etc/network/interfaces; then
+            printf 'auto %s\niface %s inet dhcp\n' "$i" "$i" >> /etc/network/interfaces
+            changed=1
+        fi
+    done
+    [ "$changed" = 1 ] && rc-service networking restart >/dev/null 2>&1
+}
+setup
+( for i in 1 2 3 4 5 6; do sleep 10; setup; done ) >/dev/null 2>&1 &
 NET
 chmod +x "$ROOTFS/etc/local.d/foyer-net.start"
 # first boot: grow root partition + filesystem to the disk
@@ -113,6 +124,14 @@ if [ -b "$disk" ] && [ -n "$part" ]; then
     partx -u "$disk" 2>/dev/null
     resize2fs "$root" >/dev/null 2>&1
 fi
+# swapfile: size chosen by the profile (written at build time), created here
+# so the image stays small and any disk size works.
+if [ -s /etc/foyer/swap_mb ] && grep -q '^/swapfile' /etc/fstab && [ ! -f /swapfile ]; then
+    dd if=/dev/zero of=/swapfile bs=1M count=$(cat /etc/foyer/swap_mb) status=none
+    chmod 600 /swapfile
+    mkswap /swapfile >/dev/null 2>&1
+    swapon /swapfile 2>/dev/null || true
+fi
 touch /etc/foyer/.firstboot-done
 FB
 chmod +x "$ROOTFS/etc/local.d/foyer-firstboot.start"
@@ -122,7 +141,14 @@ LABEL=foyer-root /     ext4 rw,relatime 0 1
 LABEL=FOYER-ESP  /boot vfat rw,relatime,fmask=0022,dmask=0022 0 2
 tmpfs            /tmp  tmpfs nosuid,nodev 0 0
 FSTAB
-if [ "$SWAP_MB" -gt 0 ]; then echo "/swapfile none swap sw 0 0" >> "$ROOTFS/etc/fstab"; fi
+if [ "$SWAP_MB" -gt 0 ]; then
+    echo "/swapfile none swap sw 0 0" >> "$ROOTFS/etc/fstab"
+    echo "$SWAP_MB" > "$ROOTFS/etc/foyer/swap_mb"
+fi
+# Audio: use the legacy HDA driver, not SOF. The SOF driver claims the
+# controller but the image ships no SOF firmware, so it creates no cards
+# (measured on geobook-240: no soundcards until forced to legacy HDA).
+printf 'options snd-intel-dspcfg dsp_driver=1\n' > "$ROOTFS/etc/modprobe.d/foyer-audio.conf"
 # root: key-only SSH; console autologin is the TV session (tty1)
 mkdir -p "$ROOTFS/root/.ssh"; chmod 700 "$ROOTFS/root/.ssh"
 cp "$OUT/.authorized_keys" "$ROOTFS/root/.ssh/authorized_keys"; chmod 600 "$ROOTFS/root/.ssh/authorized_keys"
@@ -136,6 +162,12 @@ for s in networking sshd chronyd local seatd dbus; do [ -e "$ROOTFS/etc/init.d/$
 for s in mount-ro killprocs savecache; do ln -sf /etc/init.d/$s "$ROOTFS/etc/runlevels/shutdown/$s"; done
 # the session package's post-install ran inside apk; make sure tty1 is ours
 sed -i 's|^tty1::.*|tty1::respawn:/bin/sh /usr/lib/foyer/session.sh|' "$ROOTFS/etc/inittab"
+# VAAPI driver pin (e.g. i965 on Intel Gen 9/9.5, where iHD decodes HEVC
+# far too slowly). Sourced by foyer-app on every app launch.
+[ -n "$VA_DRIVER" ] && {
+    mkdir -p "$ROOTFS/etc/foyer/env.d"
+    printf 'export LIBVA_DRIVER_NAME=%s\n' "$VA_DRIVER" > "$ROOTFS/etc/foyer/env.d/libva.conf"
+}
 cp "$OUT/.session.conf" "$ROOTFS/etc/foyer/session.conf"
 echo "$PROFILE_NAME" > "$ROOTFS/etc/foyer/profile"
 echo "$VERSION" > "$ROOTFS/etc/foyer/release"
@@ -218,10 +250,16 @@ mkfs.ext4 -q -F -L foyer-root -d "$ROOTFS" -E root_owner=0:0 /tmp/root.img "${RO
 # owners / setuid bits apk couldn't set in the namespace.
 fix_owners() {
     g_shadow=$(awk -F: '$1=="shadow"{print $3}' "$ROOTFS/etc/group")
+    u_chrony=$(awk -F: '$1=="chrony"{print $3}' "$ROOTFS/etc/passwd")
+    g_chrony=$(awk -F: '$1=="chrony"{print $4}' "$ROOTFS/etc/group")
     {
         [ -n "$g_shadow" ] && for f in /etc/shadow /etc/shadow-; do
             [ -e "$ROOTFS$f" ] && printf 'sif %s gid %s\nsif %s mode 0100640\n' "$f" "$g_shadow" "$f"
         done
+        # chrony runs as its own user and needs to write the drift file;
+        # the sandbox apk cannot chown, so it lands root:root in the image.
+        [ -n "$u_chrony" ] && [ -e "$ROOTFS/var/lib/chrony" ] && \
+            printf 'sif /var/lib/chrony chown %s %s\n' "$u_chrony" "$g_chrony"
         [ -e "$ROOTFS/usr/sbin/unix_chkpwd" ] && printf 'sif /usr/sbin/unix_chkpwd mode 0102755\n'
         [ -e "$ROOTFS/bin/bbsuid" ] && printf 'sif /bin/bbsuid mode 0104755\n'
     } > /tmp/fix.debugfs

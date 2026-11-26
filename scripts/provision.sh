@@ -59,7 +59,8 @@ systemctl disable getty@tty1.service 2>/dev/null || true
 systemctl enable foyer-session.service NetworkManager.service seatd.service ssh.service 2>/dev/null || true
 echo "==> done: $(dpkg-query -W -f '${Package} ${Version}\n' 'foyer*' | tr '\n' ' ')"
 REMOTE
-    printf '%s\n' "$SESSION_CONF" | ssh "$HOST" 'f=/etc/foyer/session.conf; grep -q "^WIDTH=[0-9]" $f 2>/dev/null || cat > $f'
+    printf '%s\n' "$SESSION_CONF" | ssh "$HOST" 'f=/etc/foyer/session.conf; grep -qE "^WIDTH=(native|[0-9])" $f 2>/dev/null || cat > $f'
+    [ -n "${VA_DRIVER:-}" ] && ssh "$HOST" "mkdir -p /etc/foyer/env.d && printf 'export LIBVA_DRIVER_NAME=%s\n' '$VA_DRIVER' > /etc/foyer/env.d/libva.conf"
     echo "==> provisioned. Start the session: ssh $HOST systemctl restart foyer-session"
     exit 0
 fi
@@ -125,5 +126,6 @@ echo "$PROFILE_NAME" > /etc/foyer/profile
 echo "==> done: $(apk info -v foyer foyer-session 2>/dev/null | tr '\n' ' ')"
 REMOTE
 # session.conf: profile defaults, but keep a mode the user already picked
-printf '%s\n' "$SESSION_CONF" | ssh "$HOST" 'f=/etc/foyer/session.conf; if grep -q "^WIDTH=[0-9]" $f 2>/dev/null; then cat > /tmp/sc.new; grep "^RENDER_" /tmp/sc.new >> $f.tmp 2>/dev/null; grep -v "^RENDER_" $f >> $f.tmp; mv $f.tmp $f; else cat > $f; fi'
+printf '%s\n' "$SESSION_CONF" | ssh "$HOST" 'f=/etc/foyer/session.conf; if grep -qE "^WIDTH=(native|[0-9])" $f 2>/dev/null; then cat > /tmp/sc.new; grep "^RENDER_" /tmp/sc.new >> $f.tmp 2>/dev/null; grep -v "^RENDER_" $f >> $f.tmp; mv $f.tmp $f; else cat > $f; fi'
+[ "${VA_DRIVER:-}" != "" ] && ssh "$HOST" "mkdir -p /etc/foyer/env.d && printf 'export LIBVA_DRIVER_NAME=%s\n' '$VA_DRIVER' > /etc/foyer/env.d/libva.conf"
 echo "==> provisioned. Restart the session: ssh $HOST 'kill -9 \$(pidof gamescope-wl gamescope)' or reboot."

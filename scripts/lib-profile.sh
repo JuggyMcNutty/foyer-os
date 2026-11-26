@@ -34,8 +34,9 @@ profile_pkgs() {
 # session.conf lines derived from the profile
 profile_session_conf() {
     echo "# foyer-os session display mode (profile: $PROFILE_NAME)."
-    echo "# Empty WIDTH/HEIGHT = monitor's preferred mode (EDID)."
-    echo "WIDTH="
+    echo "# WIDTH=native = the monitor's own resolution (from its EDID); empty"
+    echo "# = the monitor's preferred mode. Both are resolved at boot."
+    echo "WIDTH=native"
     echo "HEIGHT="
     echo "RATE="
     if [ "$RENDER_MAX" != native ]; then

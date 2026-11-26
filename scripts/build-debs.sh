@@ -69,7 +69,7 @@ for p in "$@"; do
     install -Dm755 $S/bin/foyer-app $D/usr/bin/foyer-app
     install -Dm755 $S/session.sh $D/usr/lib/foyer/session.sh
     for f in $S/*.url $S/iptv.m3u; do install -Dm644 "$f" $D/etc/foyer/$(basename "$f"); done
-    printf 'WIDTH=\nHEIGHT=\nRATE=\n' > $D/etc/foyer/session.conf
+    printf 'WIDTH=native\nHEIGHT=\nRATE=\n' > $D/etc/foyer/session.conf
     install -Dm644 $S/systemd/foyer-session.service $D/usr/lib/systemd/system/foyer-session.service
     install -Dm644 $S/backend_systemd.sh $D/usr/lib/foyer/backend_systemd.sh
     mkdir -p $D/etc/foyer/apps.d $D/etc/foyer/themes $D/etc/foyer/art

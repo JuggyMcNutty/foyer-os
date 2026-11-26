@@ -35,9 +35,20 @@ if [ -f "$SC.pending" ] && [ -f "$SC.prev" ]; then
     fi
 fi
 
-# Display mode. Empty WIDTH/HEIGHT = let gamescope use the monitor's preferred mode.
+# Display mode. Empty WIDTH/HEIGHT = let gamescope use the monitor's preferred
+# mode. WIDTH=native = the monitor's own (native) resolution, resolved here
+# from its EDID so gamescope always gets concrete numbers.
 WIDTH=""; HEIGHT=""; RATE=""; RENDER_WIDTH=""; RENDER_HEIGHT=""
 [ -r "$FOYER_CONF/session.conf" ] && . "$FOYER_CONF/session.conf"
+if [ "$WIDTH" = native ]; then
+    NAT=$(foyer-ctl display native 2>/dev/null)
+    if [ -n "$NAT" ]; then
+        WIDTH=${NAT%x*}; HEIGHT=${NAT#*x}; HEIGHT=${HEIGHT%@*}; RATE=${NAT#*@}
+        [ "$RATE" = "$NAT" ] && RATE=""
+    else
+        WIDTH=""; HEIGHT=""; RATE=""   # no EDID: fall back to the preferred mode
+    fi
+fi
 
 GS_ARGS=""
 [ -n "$WIDTH" ] && GS_ARGS="$GS_ARGS -W $WIDTH"

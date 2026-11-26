@@ -16,6 +16,11 @@ DISK=mmcblk0                 # eMMC
 IMG_SIZE=6G                  # image grows to the disk on first boot
 # Rendering: keep the UI at 1080p even if the TV accepts 4K (2 GB RAM, HD 500)
 RENDER_MAX=1920x1080
+# VAAPI: Apollo Lake (Gen9) must use the classic i965 driver. The new iHD
+# media-driver advertises HEVC but decodes ~15x slower than real time on
+# this GPU (measured 11 fps at 1080p30 vs ~200 fps with i965; software decode
+# manages ~4x realtime). Written to /etc/foyer/env.d/libva.conf by provision.
+VA_DRIVER=i965
 ASSET_BUDGET_MB=64
 SWAP_MB=512
 APPS="jellyfin youtube amazon twitch iptv"

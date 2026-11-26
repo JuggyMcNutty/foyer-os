@@ -5,7 +5,7 @@ _pkgname=jellyfin-desktop
 pkgver=2.1.0_pre2
 _tag=v2.1.0-pre2
 _mpvqt=2ebbd38bf65d01be9c55d673ecd43c8bb9a6fc8e
-pkgrel=0
+pkgrel=1
 pkgdesc="Jellyfin desktop client (Qt6 + mpv), built for Foyer"
 url="https://github.com/jellyfin/jellyfin-desktop"
 arch="x86_64 aarch64"
@@ -23,6 +23,13 @@ prepare() {
 	default_prepare
 	rmdir external/mpvqt 2>/dev/null || rm -rf external/mpvqt
 	mv "$srcdir/mpvqt-$_mpvqt" external/mpvqt
+	# The launcher (foyer) owns the Home key: it opens the quick-panel overlay
+	# over running apps via raw evdev, non-grabbing, so apps ALSO receive the
+	# key. Jellyfin's keyboard map binds Home -> "step_backward", which the
+	# TV input plugin maps to previouschapter: opening the overlay jumped the
+	# movie back to the start. Drop the binding here (an inputmaps drop-in in
+	# the profile data dir can override at runtime too).
+	sed -i '/"Home": "step_backward",/d' resources/inputmaps/keyboard.json
 }
 
 build() {

@@ -5,6 +5,12 @@
 
 HTPC_CONF=${FOYER_CONF:-/etc/foyer}
 [ -d "$HTPC_CONF" ] || HTPC_CONF=/etc/htpc
+
+# Per-box environment drop-ins (written by provision; e.g. the VAAPI driver
+# on Apollo Lake). Sourced before launching any app.
+for _f in "$HTPC_CONF"/env.d/*; do
+    [ -r "$_f" ] && . "$_f"
+done
 export PATH="/usr/local/sbin:/usr/local/bin:$PATH"
 # The session runs as root (for now); Chromium and QtWebEngine (Red,
 # jellyfin-desktop) refuse to start as root unless the sandbox is disabled.

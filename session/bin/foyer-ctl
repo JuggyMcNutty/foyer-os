@@ -6,12 +6,23 @@
 # Groups:
 #   audio   volume/get volume/set N volume/up volume/down mute/toggle sinks sink/set NAME
 #           outputs output/set CARD PROFILE output/restore
-#   display modes mode/get mode/set WxH@R|auto mode/confirm mode/revert render/set WxH|native
+#   display modes mode/get mode/set WxH@R|native|auto mode/confirm mode/revert native
+#           render/set WxH|native
 #   wifi    status scan connect SSID PSK
 #   bt      status devices scan pair MAC power on|off
 #   net     status
-#   sys     info timezone/cycle ntp/sync upgrade
+#   sys     info stats timezone/cycle ntp/sync upgrade
 #   power   shutdown reboot suspend
+#
+# display modes parses the connected display's EDID (base block + CTA-861):
+#   connector\tNAME\tSTATUS\tTYPE   once per DRM connector (first connected wins)
+#   mode\tWxH\tREFRESH\t[native|preferred]
+#   KEY=VALUE lines (name, make, model, year, size, native, preferred, hdr,
+#   vrr, colorimetry, deepcolor, cb420, cb420_depth, audio, phys, tmds,
+#   char_rate, scdc, underscan). "native" = the panel's own resolution
+#   (highest-area mode of the preferred aspect), preferred = EDID DTD 1.
+# Without a valid EDID the mode list falls back to DRM sysfs names at 60 Hz.
+# session.conf: WIDTH=native resolves the panel mode at boot (session.sh).
 
 # Config dir: /etc/foyer (legacy /etc/htpc honoured until re-provisioned)
 FOYER_CONF=${FOYER_CONF:-/etc/foyer}
@@ -39,6 +50,461 @@ done
 
 esc_wpa() {
     printf '"%s"' "$(printf '%s' "$1" | sed 's/"/\\"/g')"
+}
+
+# ---- display (EDID) -------------------------------------------------------
+# Parse the EDID of $1 (a connected DRM connector) with POSIX awk:
+# mode lines + panel info lines (see the header comment). Checks both
+# checksums, skips interlaced modes. Exits 1 without output if the EDID
+# is missing/short/corrupt so callers can fall back. The mode tables are
+# generated from edid-decode (v4l-utils utils/edid-decode); see
+# scripts/gen-edid-tables.py.
+edid_parse() {
+    od -An -v -tu1 "$1" 2>/dev/null | awk '# EDID parser - POSIX awk (busybox-safe). Reads decimal bytes on stdin
+# (od -An -v -tu1) and prints a machine-readable report.
+# Structure/rules cross-validated against edid-decode (v4l-utils).
+
+
+function emit(k, v) { printf "%s=%s\n", k, v }
+function add_mode(w, h, r, il,   a, ar) {
+    if (w < 1 || h < 1 || r < 1 || il) return
+    MODE[w "x" h "@" r] = 1
+    if (PREFW > 0) {                       # native = max-area mode of the
+        ar = (w + 0.0) / h / ((PREFW + 0.0) / PREFH)   # preferred aspect
+        if (ar < 0.98 || ar > 1.02) return
+    }
+    a = w * h
+    if (NATA < a || (NATA == a && NATR < r)) { NATW = w; NATH = h; NATR = r; NATA = a }
+}
+function dtd(o,  pclk, ha, hb, va, vb, r, il) {
+    pclk = ED[o] + ED[o + 1] * 256
+    if (pclk == 0) return 0
+    ha = ED[o + 2] + 256 * int(ED[o + 4] / 16)
+    hb = ED[o + 3] + 256 * (ED[o + 4] % 16)
+    va = ED[o + 5] + 256 * int(ED[o + 7] / 16)
+    vb = ED[o + 6] + 256 * (ED[o + 7] % 16)
+    if (ha < 1 || va < 1) return 0
+    il = int(ED[o + 17] / 128)
+    r = int(pclk * 10000 / ((ha + hb) * (va + vb)) + 0.5)
+    add_mode(ha, va, r, il)
+    if (!PREFW) { PREFW = ha; PREFH = va; PREFR = r }
+    return 1
+}
+function letters(b1, b2) {
+    return substr(AZ, int(b1 / 4) % 32, 1) substr(AZ, (b1 % 4) * 8 + int(b2 / 32), 1) substr(AZ, b2 % 32, 1)
+}
+function dstr(o,  s, i) {
+    s = ""
+    for (i = o + 5; i <= o + 17; i++)
+        if (ED[i] >= 32 && ED[i] < 127) s = s sprintf("%c", ED[i])
+    sub(/ +$/, "", s)
+    return s
+}
+function vic_mode(v,  m) {          # "WxH@R" or "WxH@R i"
+    m = VIC[v]
+    if (!m) return ""
+    return m
+}
+function add_str_mode(m,  a, b) {   # parse "WxH@R[ i]"
+    if (!m) return
+    split(m, a, "@")
+    split(a[1], b, "x")
+    add_mode(b[1], b[2], a[2], (index(m, "i") > 0))
+}
+function cta(b0,  s, d, i, tag, len, p, j, v, e, x, f, w, m, n) {
+    s = 0
+    for (i = b0; i < b0 + 128; i++) s += ED[i]
+    if (s % 256) return                    # bad CTA checksum
+    if (ED[b0] != 2 || ED[b0 + 1] < 2) return
+    d = ED[b0 + 2]
+    if (d >= 128) return
+    if (int(ED[b0 + 3] / 128) % 2) emit("underscan", "yes")
+    if (d < 4) return                      # no data blocks, no DTDs
+    nvic = 0
+    i = b0 + 4
+    while (i < b0 + d) {
+        tag = int(ED[i] / 32)
+        len = ED[i] % 32
+        p = i + 1
+        if (len == 0 || p + len > b0 + 127) break
+        if (tag == 2) {                    # video data block: VICs
+            for (j = 0; j < len; j++) {
+                v = ED[p + j]
+                VICL[nvic++] = v
+                add_str_mode(vic_mode(v))
+            }
+        } else if (tag == 1) {             # audio data block
+            for (j = 0; j + 2 < len; j += 3) {
+                x = ED[p + j]
+                f = int(x / 8) % 16
+                w = x % 8 + 1
+                AUD = AUD (AUD == "" ? "" : ", ") (f == 1 ? "LPCM " w "ch" :
+                    f == 2 ? "DD 5.1" : f == 7 ? "DTS" : f == 10 ? "DD+" :
+                    f == 11 ? "DTS-HD" : f == 12 ? "TrueHD" : "")
+            }
+        } else if (tag == 3) {              # vendor specific data block
+            v = ED[p] + ED[p + 1] * 256 + ED[p + 2] * 65536
+            if (v == 3075) {                # HDMI licensing (00-0C-03)
+                emit("phys", sprintf("%x.%x.%x.%x", int(ED[p + 3] / 16), ED[p + 3] % 16, int(ED[p + 4] / 16), ED[p + 4] % 16))
+                x = ED[p + 5]
+                DC = ""
+                if (int(x / 64) % 2) DC = DC (DC == "" ? "" : ", ") "48-bit"
+                if (int(x / 32) % 2) DC = DC (DC == "" ? "" : ", ") "36-bit"
+                if (int(x / 16) % 2) DC = DC (DC == "" ? "" : ", ") "30-bit"
+                if (int(x / 8) % 2) DC = DC (DC == "" ? "" : ", ") "RGB 4:4:4"
+                if (len >= 7) emit("tmds", ED[p + 6] * 5 " MHz")
+                # HDMI VIC list (CTA-861-F): 2160p timings often ONLY exist
+                # here, not in the CTA video data block. x[k] = ED[p+3+k]:
+                # x[4] 0x20 = list present, x[5] 3D byte, x[6] count byte
+                # (top 3 bits), VICs follow (latency fields shift them).
+                # HDMI VIC -> CTA VIC: 1=95 2=94 3=93 (3840x2160 30/25/24),
+                # 4=98 5=99 6=100 (4096x2160 24/25/30).
+                if (len >= 8 && int(ED[p + 7] / 32) % 2) {
+                    xb = 5
+                    if (int(ED[p + 7] / 128) % 2) { xb += 2; if (int(ED[p + 7] / 64) % 2) xb += 2 }
+                    if (xb + 5 <= len) {
+                        nv = int(ED[p + 3 + xb + 1] / 32) % 8
+                        for (j = 0; j < nv && xb + 2 + j <= len - 4; j++) {
+                            hv = ED[p + 3 + xb + 2 + j]
+                            if (hv == 1) add_str_mode(VIC[95])
+                            else if (hv == 2) add_str_mode(VIC[94])
+                            else if (hv == 3) add_str_mode(VIC[93])
+                            else if (hv == 4) add_str_mode(VIC[98])
+                            else if (hv == 5) add_str_mode(VIC[99])
+                            else if (hv == 6) add_str_mode(VIC[100])
+                        }
+                    }
+                }
+            } else if (v == 12869080) {     # HDMI Forum (C4-5D-D8)
+                emit("char_rate", ED[p + 4] * 5 " MHz")
+                if (int(ED[p + 5] / 128) % 2) emit("scdc", "yes")
+                x = ED[p + 6] % 16
+                CB2 = ""
+                if (int(x / 4) % 2) CB2 = CB2 (CB2 == "" ? "" : ", ") "16-bit"
+                if (int(x / 2) % 2) CB2 = CB2 (CB2 == "" ? "" : ", ") "12-bit"
+                if (x % 2) CB2 = CB2 (CB2 == "" ? "" : ", ") "10-bit"
+                x = len - 3
+                if (x >= 8 && int(ED[p + 7] / 2) % 2) emit("allm", "yes")
+                if (x >= 10) {             # HDMI 2.1 VRR
+                    e = ED[p + 8] % 64
+                    if (e) emit("vrr", e "-" int(ED[p + 8] / 64) * 16 + ED[p + 9] " Hz (HDMI 2.1)")
+                }
+            } else if (v == 26) {           # AMD (00-00-1A): FreeSync
+                if (len >= 7 && int(ED[p + 4] / 1) % 2 == 1) AMDVRR = ED[p + 5] "-" ED[p + 6] " Hz"
+            }
+        } else if (tag == 7) {              # extended tags
+            e = ED[p]
+            if (e == 5) {                   # colorimetry
+                x = ED[p + 1]
+                for (j = 0; j < 8; j++)
+                    if (int(x / PW[j]) % 2) COL = COL (COL == "" ? "" : ", ") CM1[j]
+                x = ED[p + 2]
+                for (j = 0; j < 8; j++)
+                    if (int(x / PW[j]) % 2) COL = COL (COL == "" ? "" : ", ") CM2[j]
+            } else if (e == 6) {            # HDR static metadata
+                x = ED[p + 1]
+                HDR = ""
+                for (j = 0; j < 6; j++)
+                    if (int(x / PW[j]) % 2) HDR = HDR (HDR == "" ? "" : ", ") EOTF[j]
+                if (index(HDR, "ST.2084")) HDR = "HDR10 (ST.2084)" (index(HDR, "HLG") ? " + HLG" : "")
+                else if (HDR != "") HDR = "HDR (" HDR ")"
+                if (len - 1 >= 3) HDRMAX = int(50 * exp(log(2) * ED[p + 3] / 32) + 0.5)
+                if (len - 1 >= 5) HDRMIN = int(HDRMAX * (ED[p + 5] / 255) ^ 2 / 100 + 0.5)
+            } else if (e == 15) {           # YCbCr 4:2:0 capability map
+                for (j = 1; j < len; j++) {
+                    x = ED[p + j]
+                    for (w = 7; w >= 0; w--)
+                        if (int(x / PW2[w]) % 2) {
+                            v = VICL[(j - 1) * 8 + 7 - w]
+                            if (v && index(CB420, " " v ",") == 0) CB420 = CB420 " " v ","
+                        }
+                }
+            }
+        }
+        i += len + 1
+    }
+    for (j = b0 + d; j + 17 < b0 + 127; j += 18) dtd(j)
+}
+BEGIN {
+    AZ = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+    PW[0] = 1; PW[1] = 2; PW[2] = 4; PW[3] = 8; PW[4] = 16; PW[5] = 32; PW[6] = 64; PW[7] = 128
+    PW2[0] = 128; PW2[1] = 64; PW2[2] = 32; PW2[3] = 16; PW2[4] = 8; PW2[5] = 4; PW2[6] = 2; PW2[7] = 1
+    EOTF[0] = "SDR"; EOTF[1] = "HDR gamma"; EOTF[2] = "ST.2084"; EOTF[3] = "HLG"
+    CM1[0] = "xvYCC601"; CM1[1] = "xvYCC709"; CM1[2] = "sYCC601"; CM1[3] = "opYCC601"; CM1[4] = "opRGB"; CM1[5] = "BT.2020cYCC"; CM1[6] = "BT.2020YCC"; CM1[7] = "BT.2020RGB"
+    CM2[0] = "GBP0"; CM2[4] = "Default"; CM2[5] = "sRGB"; CM2[6] = "ICtCp"; CM2[7] = "ST2113RGB"
+        EST[0]="720x400@70"
+    EST[1]="720x400@88"
+    EST[2]="640x480@60"
+    EST[3]="640x480@67"
+    EST[4]="640x480@73"
+    EST[5]="640x480@75"
+    EST[6]="800x600@56"
+    EST[7]="800x600@60"
+    EST[8]="800x600@72"
+    EST[9]="800x600@75"
+    EST[10]="832x624@75"
+    EST[12]="1024x768@60"
+    EST[13]="1024x768@70"
+    EST[14]="1024x768@75"
+    EST[15]="1280x1024@75"
+    EST[16]="1152x870@75"
+    VIC[1]="640x480@60"
+    VIC[2]="720x480@60"
+    VIC[3]="720x480@60"
+    VIC[4]="1280x720@60"
+    VIC[5]="1920x1080@60 i"
+    VIC[6]="1440x480@60 i"
+    VIC[7]="1440x480@60 i"
+    VIC[8]="1440x240@60"
+    VIC[9]="1440x240@60"
+    VIC[10]="2880x480@60 i"
+    VIC[11]="2880x480@60 i"
+    VIC[12]="2880x240@60"
+    VIC[13]="2880x240@60"
+    VIC[14]="1440x480@60"
+    VIC[15]="1440x480@60"
+    VIC[16]="1920x1080@60"
+    VIC[17]="720x576@50"
+    VIC[18]="720x576@50"
+    VIC[19]="1280x720@50"
+    VIC[20]="1920x1080@50 i"
+    VIC[21]="1440x576@50 i"
+    VIC[22]="1440x576@50 i"
+    VIC[23]="1440x288@50"
+    VIC[24]="1440x288@50"
+    VIC[25]="2880x576@50 i"
+    VIC[26]="2880x576@50 i"
+    VIC[27]="2880x288@50"
+    VIC[28]="2880x288@50"
+    VIC[29]="1440x576@50"
+    VIC[30]="1440x576@50"
+    VIC[31]="1920x1080@50"
+    VIC[32]="1920x1080@24"
+    VIC[33]="1920x1080@25"
+    VIC[34]="1920x1080@30"
+    VIC[35]="2880x480@60"
+    VIC[36]="2880x480@60"
+    VIC[37]="2880x576@50"
+    VIC[38]="2880x576@50"
+    VIC[39]="1920x1080@50 i"
+    VIC[40]="1920x1080@100 i"
+    VIC[41]="1280x720@100"
+    VIC[42]="720x576@100"
+    VIC[43]="720x576@100"
+    VIC[44]="1440x576@100 i"
+    VIC[45]="1440x576@100 i"
+    VIC[46]="1920x1080@120 i"
+    VIC[47]="1280x720@120"
+    VIC[48]="720x480@120"
+    VIC[49]="720x480@120"
+    VIC[50]="1440x480@120 i"
+    VIC[51]="1440x480@120 i"
+    VIC[52]="720x576@200"
+    VIC[53]="720x576@200"
+    VIC[54]="1440x576@200 i"
+    VIC[55]="1440x576@200 i"
+    VIC[56]="720x480@240"
+    VIC[57]="720x480@240"
+    VIC[58]="1440x480@240 i"
+    VIC[59]="1440x480@240 i"
+    VIC[60]="1280x720@24"
+    VIC[61]="1280x720@25"
+    VIC[62]="1280x720@30"
+    VIC[63]="1920x1080@120"
+    VIC[64]="1920x1080@100"
+    VIC[65]="1280x720@24"
+    VIC[66]="1280x720@25"
+    VIC[67]="1280x720@30"
+    VIC[68]="1280x720@50"
+    VIC[69]="1280x720@60"
+    VIC[70]="1280x720@100"
+    VIC[71]="1280x720@120"
+    VIC[72]="1920x1080@24"
+    VIC[73]="1920x1080@25"
+    VIC[74]="1920x1080@30"
+    VIC[75]="1920x1080@50"
+    VIC[76]="1920x1080@60"
+    VIC[77]="1920x1080@100"
+    VIC[78]="1920x1080@120"
+    VIC[79]="1680x720@24"
+    VIC[80]="1680x720@25"
+    VIC[81]="1680x720@30"
+    VIC[82]="1680x720@50"
+    VIC[83]="1680x720@60"
+    VIC[84]="1680x720@100"
+    VIC[85]="1680x720@120"
+    VIC[86]="2560x1080@24"
+    VIC[87]="2560x1080@25"
+    VIC[88]="2560x1080@30"
+    VIC[89]="2560x1080@50"
+    VIC[90]="2560x1080@60"
+    VIC[91]="2560x1080@100"
+    VIC[92]="2560x1080@120"
+    VIC[93]="3840x2160@24"
+    VIC[94]="3840x2160@25"
+    VIC[95]="3840x2160@30"
+    VIC[96]="3840x2160@50"
+    VIC[97]="3840x2160@60"
+    VIC[98]="4096x2160@24"
+    VIC[99]="4096x2160@25"
+    VIC[100]="4096x2160@30"
+    VIC[101]="4096x2160@50"
+    VIC[102]="4096x2160@60"
+    VIC[103]="3840x2160@24"
+    VIC[104]="3840x2160@25"
+    VIC[105]="3840x2160@30"
+    VIC[106]="3840x2160@50"
+    VIC[107]="3840x2160@60"
+    VIC[108]="1280x720@48"
+    VIC[109]="1280x720@48"
+    VIC[110]="1680x720@48"
+    VIC[111]="1920x1080@48"
+    VIC[112]="1920x1080@48"
+    VIC[113]="2560x1080@48"
+    VIC[114]="3840x2160@48"
+    VIC[115]="4096x2160@48"
+    VIC[116]="3840x2160@48"
+    VIC[117]="3840x2160@100"
+    VIC[118]="3840x2160@120"
+    VIC[119]="3840x2160@100"
+    VIC[120]="3840x2160@120"
+    VIC[121]="5120x2160@24"
+    VIC[122]="5120x2160@25"
+    VIC[123]="5120x2160@30"
+    VIC[124]="5120x2160@48"
+    VIC[125]="5120x2160@50"
+    VIC[126]="5120x2160@60"
+    VIC[127]="5120x2160@100"
+    VIC[193]="5120x2160@120"
+    VIC[194]="7680x4320@24"
+    VIC[195]="7680x4320@25"
+    VIC[196]="7680x4320@30"
+    VIC[197]="7680x4320@48"
+    VIC[198]="7680x4320@50"
+    VIC[199]="7680x4320@60"
+    VIC[200]="7680x4320@100"
+    VIC[201]="7680x4320@120"
+    VIC[202]="7680x4320@24"
+    VIC[203]="7680x4320@25"
+    VIC[204]="7680x4320@30"
+    VIC[205]="7680x4320@48"
+    VIC[206]="7680x4320@50"
+    VIC[207]="7680x4320@60"
+    VIC[208]="7680x4320@100"
+    VIC[209]="7680x4320@120"
+    VIC[210]="10240x4320@24"
+    VIC[211]="10240x4320@25"
+    VIC[212]="10240x4320@30"
+    VIC[213]="10240x4320@48"
+    VIC[214]="10240x4320@50"
+    VIC[215]="10240x4320@60"
+    VIC[216]="10240x4320@100"
+    VIC[217]="10240x4320@120"
+    VIC[218]="4096x2160@100"
+}
+{ for (i = 1; i <= NF; i++) ED[N++] = $i + 0 }
+END {
+    if (N < 128) exit 1
+    s = 0
+    for (i = 0; i < 128; i++) s += ED[i]
+    if (s % 256) exit 1                     # bad base checksum: fall back
+    emit("make", letters(ED[8], ED[9]))
+    emit("model", ED[10] + ED[11] * 256)
+    if (ED[16] && ED[17]) emit("year", 1990 + ED[17])
+    if (ED[21] && ED[22]) {
+        d = int(sqrt(ED[21] * ED[21] + ED[22] * ED[22]) / 2.54 * 10 + 0.5) / 10.0
+        emit("size", ED[21] " x " ED[22] " cm (" d " in)")
+    }
+    if (ED[23] && ED[23] != 255) emit("gamma", int(ED[23] + 100) / 100.0)
+    for (k = 0; k < 4; k++) {               # descriptors 1..4 at 54+18k
+        o = 54 + 18 * k
+        if (ED[o] == 0 && ED[o + 1] == 0) {
+            if (ED[o + 3] == 0xFC) NAME = dstr(o)
+            else if (ED[o + 3] == 0xFF) SERIAL = dstr(o)
+        } else if (k == 0 || ED[o] + ED[o + 1] > 0) {
+            dtd(o)                           # DTD 1 = preferred mode
+        }
+    }
+    for (i = 0; i < 24; i++)                # established timings I/II
+        if (int(ED[35 + int(i / 8)] / PW2[i % 8]) % 2) add_str_mode(EST[i])
+    for (i = 0; i < 8; i++) {               # standard timings
+        x = ED[38 + i * 2]; y = ED[39 + i * 2]
+        if (x <= 1) continue
+        w = (x + 31) * 8
+        h = int(y / 64)
+        h = h == 0 ? w * 10 / 16 : h == 1 ? w * 3 / 4 : h == 2 ? w * 4 / 5 : w * 9 / 16
+        add_mode(w, h, y % 64 + 60, 0)
+    }
+    ext = ED[126]
+    if (ext > 8) ext = 8
+    for (e = 1; e <= ext; e++) cta(128 * e)
+    # ---- emit ----
+    if (NAME != "") emit("name", NAME)
+    if (SERIAL != "") emit("serial", SERIAL)
+    if (PREFW) emit("preferred", PREFW "x" PREFH "@" PREFR)
+    if (NATW) emit("native", NATW "x" NATH "@" NATR)
+    if (HDR != "") emit("hdr", HDR)
+    if (HDRMAX > 0) emit("hdr_max", HDRMAX " cd/m2")
+    if (AMDVRR != "" && VRR == "") emit("vrr", AMDVRR " (AMD FreeSync)")
+    if (COL != "") emit("colorimetry", COL)
+    if (DC != "") emit("deepcolor", DC)
+    if (CB2 != "") emit("cb420_depth", CB2)
+    if (CB420 != "") { gsub(/,$/, "", CB420); sub(/^ /, "", CB420); emit("cb420", CB420) }
+    if (AUD != "") emit("audio", AUD)
+    nk = 0
+    for (k in MODE) KEYS[nk++] = k
+    # sort by area desc, then rate desc: simple insertion (n is small)
+    for (i = 0; i < nk; i++) {
+        split(KEYS[i], a, "@"); split(a[1], b, "x"); A2[i] = b[1] * b[2]; A3[i] = a[2] + 0
+        A1[i] = KEYS[i]
+    }
+    for (i = 0; i < nk; i++) for (j = i + 1; j < nk; j++) {
+        if (A2[j] > A2[i] || (A2[j] == A2[i] && A3[j] > A3[i])) {
+            t = A1[i]; A1[i] = A1[j]; A1[j] = t
+            t = A2[i]; A2[i] = A2[j]; A2[j] = t
+            t = A3[i]; A3[i] = A3[j]; A3[j] = t
+        }
+    }
+    nat = NATW "x" NATH "@" NATR
+    pref = PREFW "x" PREFH "@" PREFR
+    for (i = 0; i < nk; i++) {
+        f = ""
+        if (A1[i] == nat) f = "native"
+        else if (A1[i] == pref) f = "preferred"
+        split(A1[i], a2, "@")
+        printf "mode\t%s\t%s\t%s\n", a2[1], a2[2], f
+    }
+}'
+    [ $? -ne 0 ] && return 1
+    return 0
+}
+
+# Full display report for the launcher / session.sh: connector lines plus
+# the EDID report of the first *connected* connector (or its sysfs modes).
+display_report() {
+    for c in /sys/class/drm/card*-*/; do
+        [ -r "$c/status" ] || continue
+        st=$(cat "$c/status")
+        n=${c%/}; n=${n##*/}; n=${n#card*-}
+        case "$n" in
+            eDP*) t="embedded DisplayPort" ;;
+            DP*) t="DisplayPort" ;;
+            HDMI*) t="HDMI" ;;
+            *) t="video" ;;
+        esac
+        printf 'connector\t%s\t%s\t%s\n' "$n" "$st" "$t"
+        [ "$st" = connected ] || continue
+        # (sysfs binary attrs stat as size 0; -r alone is the right test)
+        if [ -r "$c/edid" ] && edid_parse "$c/edid"; then
+            return 0
+        fi
+        # No (valid) EDID: sysfs lists resolutions without refresh rates.
+        grep -v 'i$' "$c/modes" 2>/dev/null | awk -v pre=1 '!seen[$0]++ {
+            printf "mode\t%s\t60\t%s\n", $0, (pre-- > 0 ? "preferred" : "")
+        }'
+        return 0
+    done
+    return 1
 }
 
 GROUP="$1"; CMD="$2"
@@ -149,21 +615,12 @@ audio:sink/set)
     ;;
 # ---- display -----------------------------------------------------------
 display:modes)
-    # Modes the connected monitor reports (EDID via DRM), one per line:
-    #   connector <name> <status>
-    #   mode <WxH> [preferred]
-    for c in /sys/class/drm/card*-*; do
-        [ -r "$c/status" ] || continue
-        st=$(cat "$c/status"); n=${c##*/}; n=${n#card*-}
-        printf 'connector\t%s\t%s\n' "$n" "$st"
-        [ "$st" = connected ] || continue
-        first=1
-        # The kernel lists the preferred mode first; drop interlaced and dupes.
-        grep -v 'i$' "$c/modes" 2>/dev/null | awk '!seen[$0]++' | while read -r m; do
-            if [ $first = 1 ]; then printf 'mode\t%s\tpreferred\n' "$m"; first=0
-            else printf 'mode\t%s\n' "$m"; fi
-        done
-    done
+    # Connector + mode + panel report (see display_report above).
+    display_report
+    ;;
+display:native)
+    # The panel's native mode (WxH@R), for session.sh WIDTH=native.
+    display_report | sed -n 's/^native=//p' | head -1
     ;;
 display:mode/confirm)
     # Keep the current mode: drop the revert point.
@@ -195,34 +652,36 @@ display:render/set)
     ( sleep 1; be_restart_session ) >/dev/null 2>&1 &
     ;;
 display:mode/get)
-    # Current gamescope output mode from session.conf (WIDTH=/HEIGHT=/RATE=)
+    # Current gamescope output mode from session.conf (WIDTH=/HEIGHT=/RATE=;
+    # WIDTH=native = the panel native mode, resolved by session.sh at boot)
     if [ -r "$SESSION_CONF" ]; then
         W=$(sed -n 's/^WIDTH=//p' "$SESSION_CONF" | head -1)
         H=$(sed -n 's/^HEIGHT=//p' "$SESSION_CONF" | head -1)
         R=$(sed -n 's/^RATE=//p' "$SESSION_CONF" | head -1)
     fi
-    if [ -n "$W" ] && [ -n "$H" ]; then echo "${W}x${H}@${R:-60}"; else echo "auto"; fi
+    if [ "$W" = native ]; then echo "native"
+    elif [ -n "$W" ] && [ -n "$H" ]; then echo "${W}x${H}@${R:-60}"
+    else echo "auto"; fi
     RW=$(sed -n 's/^RENDER_WIDTH=//p' "$SESSION_CONF" 2>/dev/null | head -1)
     RH=$(sed -n 's/^RENDER_HEIGHT=//p' "$SESSION_CONF" 2>/dev/null | head -1)
     if [ -n "$RW" ] && [ -n "$RH" ]; then echo "render=${RW}x${RH}"; else echo "render=native"; fi
     if [ -f "$SESSION_CONF.pending" ]; then echo "pending=1"; fi
     ;;
 display:mode/set)
-    # Rewrite WIDTH/HEIGHT/RATE in session.conf and restart the session
+    # Rewrite WIDTH/HEIGHT/RATE in session.conf and restart the session.
+    # native = the panel native mode (resolved by session.sh at boot).
     M="$1"
-    if [ "$M" = auto ]; then
-        [ -f "$SESSION_CONF" ] || { echo "FAIL no session.conf"; exit 1; }
-        cp "$SESSION_CONF" "$SESSION_CONF.prev"; touch "$SESSION_CONF.pending"
-        for k in WIDTH HEIGHT RATE; do sed -i "s/^$k=.*/$k=/" "$SESSION_CONF"; done
-        echo "OK"
-        ( sleep 1; be_restart_session ) >/dev/null 2>&1 &
-        exit 0
-    fi
-    W=$(echo "$M" | cut -dx -f1)
-    H=$(echo "$M" | cut -dx -f2 | cut -d@ -f1)
-    R=$(echo "$M" | cut -s -d@ -f2); [ -n "$R" ] || R=60
-    case "$W$H$R" in
-        *[!0-9]*|"") echo "FAIL bad mode '$M'"; exit 1 ;;
+    case "$M" in
+    auto) W=""; H=""; R="" ;;
+    native) W="native"; H=""; R="" ;;
+    *)
+        W=$(echo "$M" | cut -dx -f1)
+        H=$(echo "$M" | cut -dx -f2 | cut -d@ -f1)
+        R=$(echo "$M" | cut -s -d@ -f2); [ -n "$R" ] || R=60
+        case "$W$H$R" in
+            *[!0-9]*|"") echo "FAIL bad mode '$M'"; exit 1 ;;
+        esac
+        ;;
     esac
     if [ -f "$SESSION_CONF" ]; then
         cp "$SESSION_CONF" "$SESSION_CONF.prev"
@@ -345,6 +804,89 @@ net:status)
     fi
     ;;
 # ---- sys ---------------------------------------------------------------
+sys:stats)
+    # Live usage snapshot for Settings > Stats. CPU + network rates are
+    # averaged over a short internal interval so each call is self-contained.
+    # Lines (TAB separated): cpu %, core N %, mem kB, swap kB, load, proc
+    # total/running, temp name milliC, gpu busy% MHz, net iface B/s rx tx,
+    # disk kB used/total, up seconds.
+    IFACES=$(for n in /sys/class/net/*; do
+        i=${n##*/}
+        case "$i" in lo|docker*|veth*|br-*|virbr*) continue ;; esac
+        [ -r "$n/statistics/rx_bytes" ] || continue
+        printf '%s ' "$i"
+    done)
+    awk -v ifs="$IFACES" 'BEGIN {
+        NIF = split(ifs, IF, " ")
+        sample(0); system("sleep 0.5"); sample(1)
+        for (i = 1; i <= NC; i++) {
+            id = ID[i]
+            dt = T[id ",1"] - T[id ",0"]; db = U[id ",1"] - U[id ",0"]
+            pct = dt > 0 ? int(100 * db / dt + 0.5) : 0
+            if (id == "cpu") printf "cpu\t%d\n", pct
+            else printf "core\t%s\t%d\n", substr(id, 4), pct
+        }
+        for (i = 1; i <= NIF; i++) {
+            rx = (NRX[IF[i] ",1"] - NRX[IF[i] ",0"]) / 0.5
+            tx = (NTX[IF[i] ",1"] - NTX[IF[i] ",0"]) / 0.5
+            printf "net\t%s\t%.0f\t%.0f\n", IF[i], rx, tx
+        }
+        while ((getline l < "/proc/meminfo") > 0) {
+            split(l, a, ":")
+            if (a[1] == "MemTotal") MT = a[2] + 0
+            else if (a[1] == "MemAvailable") MA = a[2] + 0
+            else if (a[1] == "SwapTotal") SW = a[2] + 0
+            else if (a[1] == "SwapFree") SF = a[2] + 0
+        }
+        close("/proc/meminfo")
+        printf "mem\t%d\t%d\n", MT, MA
+        printf "swap\t%d\t%d\n", SW, SW - SF
+        getline l < "/proc/loadavg"; split(l, a, " ")
+        printf "load\t%s\t%s\t%s\n", a[1], a[2], a[3]
+        split(a[4], b, "/"); printf "proc\t%s\t%s\n", b[2], b[1]
+        getline l < "/proc/uptime"; split(l, a, " "); printf "up\t%s\n", a[1]
+    }
+    function sample(s,  l, a, i, id, t, u, rx, tx) {
+        while ((getline l < "/proc/stat") > 0) {
+            if (l !~ /^cpu[0-9]*[ \t]/) continue
+            split(l, a, /[ \t]+/)
+            id = a[1]; t = 0
+            for (i = 2; i <= 9; i++) t += a[i]
+            u = t - a[5] - a[6]
+            if (!(id in SEEN)) { SEEN[id]; ID[++NC] = id }
+            U[id "," s] = u; T[id "," s] = t
+        }
+        close("/proc/stat")
+        for (i = 1; i <= NIF; i++) {
+            rx = 0; tx = 0
+            getline rx < ("/sys/class/net/" IF[i] "/statistics/rx_bytes")
+            getline tx < ("/sys/class/net/" IF[i] "/statistics/tx_bytes")
+            close("/sys/class/net/" IF[i] "/statistics/rx_bytes")
+            close("/sys/class/net/" IF[i] "/statistics/tx_bytes")
+            NRX[IF[i] "," s] = rx + 0; NTX[IF[i] "," s] = tx + 0
+        }
+    }' /dev/null
+    # Thermal zones (skip zones reporting nonsense like 0C)
+    for z in /sys/class/thermal/thermal_zone*/; do
+        [ -r "$z/temp" ] || continue
+        t=$(cat "$z/temp" 2>/dev/null) || continue
+        case "$t" in ''|*[!0-9-]*) continue ;; esac
+        [ "$t" -lt 10000 ] && continue
+        printf 'temp\t%s\t%s\n' "$(cat "$z/type" 2>/dev/null || echo zone)" "$t"
+    done
+    # GPU load/frequency, best effort: amdgpu sysfs, i915 gt sysfs
+    for c in /sys/class/drm/card[0-9]*; do
+        [ -d "$c" ] || continue
+        b=$(cat "$c/device/gpu_busy_percent" 2>/dev/null)
+        f=""
+        [ -r "$c/gt_cur_freq_mhz" ] && f=$(cat "$c/gt_cur_freq_mhz")
+        [ -z "$f" ] && [ -r "$c/gt/gt0/cur_freq_mhz" ] && f=$(cat "$c/gt/gt0/cur_freq_mhz")
+        [ -z "$f" ] && [ -r "$c/device/pp_dpm_sclk" ] && \
+            f=$(awk '/\*/{gsub(/[^0-9]/, "", $2); print $2}' "$c/device/pp_dpm_sclk" 2>/dev/null | head -1)
+        [ -n "$b$f" ] && printf 'gpu\t%s\t%s\n' "${b:--}" "${f:--}"
+    done
+    df -k / 2>/dev/null | awk 'NR==2 { printf "disk\t%s\t%s\n", $3, $2 }'
+    ;;
 sys:info)
     echo "hostname=$(hostname)"
     echo "timezone=$(cat /etc/timezone 2>/dev/null || readlink /etc/localtime 2>/dev/null | sed 's|.*/zoneinfo/||')"
