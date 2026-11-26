@@ -259,7 +259,7 @@ fix_owners() {
         # chrony runs as its own user and needs to write the drift file;
         # the sandbox apk cannot chown, so it lands root:root in the image.
         [ -n "$u_chrony" ] && [ -e "$ROOTFS/var/lib/chrony" ] && \
-            printf 'sif /var/lib/chrony chown %s %s\n' "$u_chrony" "$g_chrony"
+            printf 'sif /var/lib/chrony uid %s\nsif /var/lib/chrony gid %s\n' "$u_chrony" "$g_chrony"
         [ -e "$ROOTFS/usr/sbin/unix_chkpwd" ] && printf 'sif /usr/sbin/unix_chkpwd mode 0102755\n'
         [ -e "$ROOTFS/bin/bbsuid" ] && printf 'sif /bin/bbsuid mode 0104755\n'
     } > /tmp/fix.debugfs
