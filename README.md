@@ -21,7 +21,7 @@ big-picture launcher**, built for a specific device from a **profile**.
 | `foyer/` | The launcher (git submodule, `JuggyMcNutty/foyer`) |
 | `session/` | `session.sh` (tty1 → PipeWire + gamescope + Foyer), `foyer-ctl` (system control backend), `foyer-app` (app wrappers), `foyer-update`, default URLs |
 | `aports/` | APKBUILDs: `foyer`, `foyer-session`, `foyer-update`, `foyer-sdl3_image`, `foyer-red`, `foyer-jellyfin-desktop` |
-| `profiles/` | Device profiles (`ideapad-120s`, `generic-x86_64`, `qemu`) + `base/<distro>.pkgs` logical→package maps |
+| `profiles/` | Device profiles (`geobook-240`, `ideapad-120s`, `generic-x86_64`, `qemu`) + `base/<distro>.pkgs` logical→package maps |
 | `scripts/` | `alpine-env.sh`, `build-apks.sh`, `make-image.sh`, `provision.sh`, `boot-test.sh` (+ Debian equivalents) |
 | `.github/workflows/release.yml` | CI: APKs → images per profile → QEMU boot test → release on `v*` tags |
 
@@ -42,8 +42,8 @@ scripts/boot-test.sh out/foyer-os-qemu-*.img uefi  # QEMU smoke test (after make
 zstd -dc out/foyer-os-generic-x86_64-*.img.zst | sudo dd of=/dev/sdX bs=4M conv=fsync
 
 # or turn an existing stock Alpine install into foyer-os over SSH
-scripts/provision.sh ideapad-120s root@192.168.1.123
-scripts/provision.sh ideapad-120s root@box --release v3.0.0   # from a GitHub release
+scripts/provision.sh geobook-240 root@192.168.1.123
+scripts/provision.sh geobook-240 root@box --release v3.0.0    # from a GitHub release
 ```
 
 ## Device profiles

@@ -10,7 +10,8 @@ A reproducible living-room appliance:
 
 - **Base:** Alpine 3.24 (musl, OpenRC) on the current box, or Debian trixie
   (glibc, systemd), chosen by the `BASE=` field of the profile. Debian is
-  intended for the 4K board: glibc apps and Widevine-capable browsers.
+  intended for a Widevine-capable box (Prime Video DRM): glibc apps and
+  Widevine-capable browsers.
 - **Compositor:** gamescope. If gamescope can't start (e.g. no DRM-capable
   Vulkan), the session falls back to Foyer on KMS.
 - **Audio:** PipeWire, pipewire-pulse and WirePlumber, started inside the
@@ -49,7 +50,7 @@ HDMI 1.4 to a 4K TV; the old ideapad 120S is in
 | Launcher dev build | `cd foyer && cmake -S . -B build && cmake --build build && ./build/tests/foyer_tests` |
 | Launcher UI screenshot (any res) | `FOYER_DATA_DIR=$PWD/data ./build/src/foyer -c /tmp/cfg --size 3840x2160 --screenshot out.png [--open :display] [--keys right,accept]` |
 | APKs | `scripts/build-apks.sh [pkg...]` → `out/apks/x86_64/` |
-| Provision a box | `scripts/provision.sh ideapad-120s htpc` (only APKs; no on-box compiling) |
+| Provision a box | `scripts/provision.sh geobook-240 htpc` (only APKs; no on-box compiling) |
 | Disk image | `scripts/make-image.sh <profile> --ssh-key ~/.ssh/id_ed25519.pub` |
 | QEMU boot test | `FOYER_EXPECT_UI=1 scripts/boot-test.sh out/foyer-os-qemu-*.img {bios,uefi}` |
 | .debs (trixie) | `scripts/build-debs.sh` → `out/debs/trixie/` |
@@ -123,14 +124,13 @@ HDMI 1.4 to a 4K TV; the old ideapad 120S is in
 - [ ] Red on Debian: needs Qt ≥ 6.11, but trixie has 6.8. YouTube on Debian
   uses the Chromium `youtube.com/tv` fallback in `foyer-app`.
 - [ ] Apps run as root (sandbox disabled). Move them to an unprivileged user.
-- [ ] CEC: no adapter (HD 500 has no CEC). Revisit with a Pulse-Eight USB
-  adapter.
+- [ ] CEC: no adapter (ideapad's HD 500 exposed none; unverified on the
+  geobook's UHD 605). Revisit with a Pulse-Eight USB adapter.
 
 ## Gotchas (keep these)
 
-- **Box**
-  - **OpenRC, ifupdown-ng, musl, no AVX, 2 GB RAM.** eMMC swap is slow; keep
-    the resident set small (Foyer ~75 MB, gamescope ~45 MB).
+- **Both boxes** (ideapad N3350 + geobook N5030)
+  - **OpenRC, ifupdown-ng, musl, no AVX** (both SoCs top out at SSE4.2).
   - **gamescope ignores SIGTERM**: restart the session with
     `kill -9 $(pidof gamescope-wl)`.
   - **`pgrep -f gamescope` matches your own ssh shell.** Use
@@ -140,17 +140,18 @@ HDMI 1.4 to a 4K TV; the old ideapad 120S is in
     v2's job results vanish.
   - **PipeWire must be restarted as a set.** A half-dead set (no wireplumber)
     makes SDL's audio open hang; Foyer now opens audio on a thread.
-  - **VAAPI must use the `i965` driver on this GPU** (Gen9/Apollo Lake): the
-    newer `iHD` media-driver advertises HEVC decode but runs ~15× slower
-    than real time on it — mpv's default `hwdec=auto-copy` then produces a
-    slow-motion slideshow with audio at normal speed (measured: 20 s of
-    1080p30 HEVC in 52 s with iHD vs 3 s with i965; software manages ~4×
-    realtime). Set via `/etc/foyer/env.d/libva.conf` (`export LIBVA_DRIVER_NAME=i965`,
-    written by provision from the profile's `VA_DRIVER`); `foyer-app` sources
-    `env.d/*` — **env.d files must `export` their vars** (they are sourced,
-    not exec'd; a missing export cost a whole debugging round once).
-    `/etc/libva.conf` is ignored by this libva build. jellyfin-desktop
-    (libmpv) and the IPTV mpv both ride on this.
+  - **VAAPI must use the `i965` driver on both GPUs** (Gen9 Apollo Lake and
+    Gen9.5 Gemini Lake): the `iHD` media-driver advertises HEVC decode but
+    runs ~15× slower than realtime on the ideapad and ~38× on the geobook
+    (4K 10-bit: 190 s vs 3.8 s for 5 s of content) — mpv's default
+    `hwdec=auto-copy` then produces a slow-motion slideshow with audio at
+    normal speed. Set via `/etc/foyer/env.d/libva.conf`
+    (`export LIBVA_DRIVER_NAME=i965`, written by make-image.sh / provision
+    from the profile's `VA_DRIVER`); `foyer-app` sources `env.d/*` — **env.d
+    files must `export` their vars** (they are sourced, not exec'd; a missing
+    export cost a whole debugging round once). `/etc/libva.conf` is ignored by
+    this libva build. jellyfin-desktop (libmpv) and the IPTV mpv both ride on
+    this.
   - **The Home key belongs to the launcher; app keymaps must not bind it.**
     Foyer's `evdev_global` is a **non-grabbing** reader: while an app has
     focus, every keypress reaches BOTH the app (focused window via
@@ -166,6 +167,18 @@ HDMI 1.4 to a 4K TV; the old ideapad 120S is in
     Jellyfin's ds4 maps is still app-internal).
   - `session.sh` lives in `/usr/lib/foyer/` (package code). Config lives in
     `/etc/foyer/`, and `/etc/htpc` is a compat symlink.
+- **ideapad 120S (old box, powered off)**
+  - **2 GB RAM, eMMC swap is slow** — keep the resident set small (Foyer
+    ~75 MB, gamescope ~45 MB).
+- **geobook 240 (current box)**
+  - **SOF vs HDA audio:** the kernel SOF driver claims the HDA controller and
+    without `sof-firmware` creates no soundcards. The image ships
+    `/etc/modprobe.d/foyer-audio.conf` with `options snd-intel-dspcfg
+    dsp_driver=1` (legacy HDA; `0` = auto = SOF).
+  - **USB r8153 Ethernet can fail to come up at boot** — a reboot fixes it;
+    `foyer-net.start` retries 60 s for late enumeration.
+  - **Broken Realtek c821 BT dongle** in a USB reset loop — unplug it.
+  - Full facts in [hardwarefacts.md](hardwarefacts.md).
 - **Build sandbox**
   - It is a single-uid user namespace. apk can't chown or set setuid bits;
     the `/sbin/apk` wrapper in the sandbox clears the resulting stale error

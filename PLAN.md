@@ -1,5 +1,9 @@
 # PLAN — Foyer v3 + foyer-os: big-picture UI engine, any-resolution layout, device-profile build framework
 
+> **Historical plan (2026-11-24) — executed.** The "current box" references below
+> are from when it was written (the ideapad 120S); the box has since been replaced
+> by the Geobook 240. Current state: see AGENTS.md.
+
 ## Context
 
 User feedback after TV testing of v2:

@@ -1,8 +1,12 @@
-# HTPC Mini PC — Hardware Facts
+# HTPC Mini PC (ideapad 120S) — Hardware Facts
 
-> Source of truth for the box at `192.168.1.123` (ssh alias: `htpc`).
+> **Previous box** — replaced by the Geobook 240 on 2026-11-26 (now powered
+> off; its IP `192.168.1.123` went to the Geobook). Kept for reference: the
+> same VAAPI/Home-key/EDID findings apply. The current box is documented in
+> [hardwarefacts.md](hardwarefacts.md).
 > Verified via SSH on 2026-11-24 (fresh install, nothing installed yet beyond base).
-> Re-verify with the commands in the [Verification](#verification) section before trusting stale values.
+> Re-verify with the commands in the [Verification](#verification) section
+> (point them at the ideapad's address) before trusting stale values.
 
 ## TL;DR
 
@@ -160,6 +164,7 @@ No Wi-Fi/BT radios. No USB-A ports visible on the board.
 ## Verification
 
 ```sh
+# when the ideapad is back online (replace htpc with its address)
 ssh htpc 'grep "model name" /proc/cpuinfo; free -h; cat /sys/class/dmi/id/product_name /sys/class/dmi/id/product_serial'
 ssh htpc 'for c in /sys/class/drm/card1-*/; do echo "$c $(cat $c/status) $(cat $c/modes|head -1)"; done'
 ssh htpc 'cat /sys/block/mmcblk0/size; swapon --show; df -h /; ip -brief a'
