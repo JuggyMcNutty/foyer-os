@@ -90,7 +90,10 @@ HDMI 1.4 to a 4K TV; the old ideapad 120S is in
   CTA-861, POSIX awk, tables harvested from edid-decode) — modes with real
   refresh rates plus HDR/VRR/colour/deep colour/link clocks; Settings → Display
   shows them. Settings → Stats polls `foyer-ctl sys stats` (CPU + per-core,
-  GPU, memory, storage, temperatures, network rates) every 2 s.
+  GPU, memory, storage, temperatures, network rates) every 2 s, with 60 s
+  bar-graph sparklines (CPU/RAM/net), top-10 processes by CPU with kill,
+  per-mount storage, root-disk I/O rates and the GPU freq range; the quick
+  panel shows a one-line CPU/RAM/temp/net readout.
 - [x] **Build framework**: bwrap Alpine sandbox, 6 APKBUILDs, profiles,
   provision.sh, rootless make-image.sh, QEMU boot test (BIOS + UEFI pass).
   The box was re-provisioned from APKs; `/usr/local` is empty.
@@ -198,8 +201,60 @@ HDMI 1.4 to a 4K TV; the old ideapad 120S is in
   - Don't upgrade openssl.
   - **Never exec on the host** without the user's approval.
   - The `read` tool sometimes lags new files by ~20 s.
+  - **pi-background-tasks is locally patched (steer delivery).** Completion
+    notifications normally queue as `followUp` and only land when the current
+    agent turn ends — on the slow local model that's 10–100 min late. Patched
+    `~/.pi/agent/npm/node_modules/pi-background-tasks/dist/src/core/registry.js`
+    to `deliverAs: 'steer'` so they inject at the next turn boundary (mid-turn).
+    Backup: `registry.js.bak-followup`. Re-apply after any `pi update` (the
+    package reinstalls from npm on `/reload`/start when a newer version exists).
+    Upstream: ismailsaleekh/pi-background-tasks#53.
 
 ## Session log
+
+### 2026-11-27 — session 11 (stats panel: graphs, top processes, quick-panel stats)
+
+- **Settings → Stats extended** (plan: `plans/stats-panel.md`), foyer r5→r6,
+  foyer-session r4→r5, provisioned to the box, session restarted, native
+  display mode + air mouse remap verified intact.
+- **`ui::Graph`** (widgets.{hpp,cpp}): 30-slot ring buffer (2 s samples → 60 s),
+  `push(v)` clamps 0..1, paints a dim rounded track + accent bars (Canvas::fill,
+  no new primitives). Graph unit tests in test_engine.cpp (44→45 cases, 377
+  assertions).
+- **`foyer-ctl sys procs [N]`** (default 10): same double-sample pattern as
+  sys stats; CPU% = 100·Δticks·nproc/Δtotal (top-style, % of one core);
+  `proc\tPID\tCPU%\tMEM_KB\tNAME` desc. **`sys kill PID`** = kill -TERM.
+- **`foyer-ctl sys stats` extended**: `dio\tREAD_KB/s\tWRITE_KB/s` (root disk
+  major:minor from /proc/self/mountinfo, /proc/diskstats sector deltas over
+  0.5 s), gpu line gains min/max MHz (i915 gt_min/max_freq_mhz, amdgpu
+  pp_dpm_sclk first/last), single root `disk` line replaced by per-mount
+  `disk\tMOUNT\tused\ttotal` (pseudo-fs + loop devices skipped). Parser
+  (sysctl.cpp) keeps the old 3-field gpu and 2-field disk forms.
+- **StatsPage**: CPU/RAM/net graphs (net uses adaptive scale, 1 MB/s floor),
+  per-mount storage rows, Disk I/O row (idle when 0), GPU "717 MHz
+  (100–750)", Top processes section: RowButton per entry → ConfirmDialog →
+  `sys kill` → toast. Page polls `sys stats` + `sys procs 10` every 2 s.
+- **QuickPanel**: one-line dim readout under the header ("CPU 12% · RAM
+  3.2/8.0 GB · 35°C · 4.5 MB/s"), polled every 2 s in `tick()` while on top
+  (internal + overlay modes; the overlay process has its own JobQueue).
+- Verified: 45/45 tests; busybox-awk clean (alpine-env.sh); dev screenshots at
+  4K/720p (16-core dev box makes the page tall — per-core rows push the RAM
+  graph below the fold; on the 4-core box everything fits the first screen);
+  live on the box: procs/dio/gpu-range/per-mount all correct.
+
+### 2026-11-27 — session 10 (pi-background-tasks: late notifications diagnosed + steer patch)
+
+- **Why bg_run notifications arrive late:** they are sent with
+  `deliverAs: 'followUp'`; pi's agent loop only drains the followUp queue when
+  the current turn is about to end. Delay = remaining turn time; with the
+  local 27B model that's minutes to hours. Measured from session logs:
+  15–25 ms when idle, up to 105 min mid-turn, delivered in bursts at turn end
+  (one per follow-up turn, steeringMode one-at-a-time).
+- **Fix (local):** patched the extension to `deliverAs: 'steer'` (injected at
+  the next turn boundary, mid-turn). See Gotchas for path/backup. Upstream
+  issue filed: ismailsaleekh/pi-background-tasks#53.
+- Activate with `/reload` (or next pi start). Revert = restore
+  `registry.js.bak-followup`.
 
 ### 2026-11-26 — session 9 (real 4K TV + XING WEI air mouse: pointer, remap panel)
 
