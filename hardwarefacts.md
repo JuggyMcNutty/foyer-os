@@ -91,9 +91,13 @@ Repurposed **GEOMARK Geobook 240** 14" 2-in-1 laptop motherboard in a mini-PC en
 
 ## Input — XING WEI 2.4G air mouse (`4842:0001`)
 
-USB composite device, 4 HID interfaces (event7 kbd, event11 mouse, event12/13 event). 15
-physical buttons: d-pad (left/right/up/down), enter, menu 1/2/3, power, mute, del, click,
-return, vol down, vol up — plus left/right click and wheel. **None of the buttons are
+USB composite device. The event nodes re-number on every re-plug; as of 2026-11-27 it
+exposes **5** nodes (event4 kbd, event5 Mouse, event6 Consumer Control, event7 System
+Control, event8) and **four** of them advertise MSC_SCAN — the same button code can be
+mirrored onto several nodes at once, so a reader must dedup by code + time window
+(`Airmouse::step()`, 100 ms). 15 physical buttons: d-pad (left/right/up/down), enter,
+menu 1/2/3, power, mute, del, click, return, vol down, vol up — plus left/right click
+and wheel. **None of the buttons are
 EV_KEY/BTN_*** — the firmware reports every button as **EV_MSC MSC_SCAN** with a 24-bit
 HID usage (`page<<16 | usage<<8`) and emits the code **twice per press** (press report,
 release report). The compositor never sees MSC_SCAN, so Foyer reads it itself

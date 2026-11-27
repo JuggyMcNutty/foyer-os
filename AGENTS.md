@@ -113,10 +113,10 @@ HDMI 1.4 to a 4K TV; the old ideapad 120S is in
 - [x] **TV check by the user** (session 9): the box is on the real TOSHIBA 52" 4K TV
   (the "4K monitor"); native 4K@30 scanout confirmed, navigation is via the XING WEI
   2.4G air mouse (wave pointer + 15 buttons).
-- [x] **Air mouse support (Foyer r4)**: pointer hover/click/wheel in the UI engine,
+- [x] **Air mouse support (Foyer r5)**: pointer hover/click/wheel in the UI engine,
   `foyer/src/input/airmouse.cpp` reads the device's MSC_SCAN buttons directly (the
-  compositor never sees them), Settings → Air mouse remap page with live button
-  highlighting. Details in the session 9 log + hardwarefacts.md.
+  compositor never sees them), cross-node mirror dedup, Settings → Air mouse remap
+  page with live button highlighting. Details in the session 9 log + hardwarefacts.md.
 - [ ] Prime Video DRM (no Widevine on Alpine; the Debian base may fix it).
 - [ ] IPTV playlist is still a placeholder.
 - [x] Phase E (Debian/glibc):
@@ -242,6 +242,19 @@ HDMI 1.4 to a 4K TV; the old ideapad 120S is in
 - Tests: 36 → 42 cases (pointer hover/click/wheel, D-pad-beats-jitter, action
   parsing, default keymap, MSC pairing/sweep, airmouse settings round-trip incl.
   hand-written TOML). APK r4 provisioned to the box; live TV check pending.
+- **Double-check (r5, pkgrel 4→5):** re-verified the whole path and found a real
+  bug. The XING WEI composite exposes **5** event nodes (event4 kbd, event5 mouse,
+  event6 Consumer Control, event7 System Control, event8) and **four** of them
+  advertise MSC_SCAN — the same button code can be mirrored onto several nodes.
+  The original reader used one shared press/release toggle, so a mirrored press
+  would fire the action 2–3×. Fixed with `Airmouse::step()`: first report after a
+  100 ms window is a press, the next is a release, reports within the window are
+  mirrors and are ignored (cross-node + double-report safe). Also: pre-register
+  `evt_airmouse()` on the main thread (was lazy-registered on the reader thread),
+  and fixed the stuck-press sweep window units (was 2000 µs; now 500 ms). 42/42
+  tests still pass; r5 provisioned and matched all 5 nodes on the box.
+  Verified the user had already remapped on the TV (left click → Left in
+  /etc/foyer/settings.toml) — the remap page works live.
 
 ### 2026-11-26 — session 8 (Geobook 240 N5030 online as the new box)
 
