@@ -110,8 +110,13 @@ HDMI 1.4 to a 4K TV; the old ideapad 120S is in
   after adding `export`). Fixed the box file + `provision.sh` now writes
   `export LIBVA_DRIVER_NAME=...`. Note for env.d drop-ins: **they must
   `export` their vars** (sourced, not exec'd).
-- [ ] **TV check by the user**: navigation feel, the overlay over Jellyfin/Red,
-  sound.
+- [x] **TV check by the user** (session 9): the box is on the real TOSHIBA 52" 4K TV
+  (the "4K monitor"); native 4K@30 scanout confirmed, navigation is via the XING WEI
+  2.4G air mouse (wave pointer + 15 buttons).
+- [x] **Air mouse support (Foyer r4)**: pointer hover/click/wheel in the UI engine,
+  `foyer/src/input/airmouse.cpp` reads the device's MSC_SCAN buttons directly (the
+  compositor never sees them), Settings → Air mouse remap page with live button
+  highlighting. Details in the session 9 log + hardwarefacts.md.
 - [ ] Prime Video DRM (no Widevine on Alpine; the Debian base may fix it).
 - [ ] IPTV playlist is still a placeholder.
 - [x] Phase E (Debian/glibc):
@@ -195,6 +200,48 @@ HDMI 1.4 to a 4K TV; the old ideapad 120S is in
   - The `read` tool sometimes lags new files by ~20 s.
 
 ## Session log
+
+### 2026-11-26 — session 9 (real 4K TV + XING WEI air mouse: pointer, remap panel)
+
+- **The "4K monitor" is the TOSHIBA 52" TV** (EDID TSB/48, TOSHIBA-TV, 2022). Cross-
+  checked `foyer-ctl display modes` against edid-decode field-by-field: preferred
+  1080p60, **native 3840x2160@30** (HDMI VIC 1, 297 MHz), 4K50/60 exists only in the
+  YCbCr 4:2:0 block at 594 MHz — unachievable over the HDMI 1.4 link (VSDB max TMDS
+  300 MHz) — so 4K@30 is the correct native; no HDR/VRR on this panel. Box runs
+  `WIDTH=native` → gamescope `-W 3840 -H 2160 -r 30 -w 3840 -h 2160`, render native.
+- **Air mouse = XING WEI 2.4G USB composite (4842:0001)**, 15 buttons (d-pad, enter,
+  menu 1-3, power, mute, del, click, return, vol±) + left/right click + wheel. The
+  keymap is weird: **no button is an EV_KEY** — the firmware reports every button as
+  **EV_MSC MSC_SCAN** with a 24-bit HID usage (page<<16|usage<<8), **twice per press**
+  (press + release report), and floods EV_KEY code-0 releases. Left click = MSC
+  0x090001 (Button 1) — not BTN_LEFT. Wheel = 0x010081, same code both directions.
+  Pointer = continuous REL_X/Y at ~60 Hz with ±1 jitter at rest. Captured with a raw
+  evdev python script (24-byte input_event! x86_64) + strict press-order session; full
+  code table in hardwarefacts.md.
+- **Foyer r4 (foyer pkgrel 3→4):**
+  - UI engine pointer support: `Engine::pointer_move/wheel/click/hit_test` — hover
+    focuses the topmost node under the cursor (frontmost-first DFS, scroller viewport
+    clipping), left click selects, right click backs out, wheel scrolls the scroller
+    under the pointer. **Jitter guard:** focus-generation rebasing + a 6 px movement
+    threshold so the air mouse's constant REL stream can't yank focus away from the
+    D-pad (a D-pad move rebases the pointer origin; ≥6 px re-engages hover).
+  - `input/airmouse.cpp`: own-thread /dev/input reader matched by USB product string
+    (default `XING WEI`, configurable), MSC press/release pairing with a 2 s
+    auto-release sweep, EV_KEY presses too (for other air mice), inotify hotplug.
+  - Settings → **Air mouse** page (new category tile, new `mouse.svg` icon): device
+    status, enable toggle, one row per button with **live highlighting** (press a
+    button → its row glows; unknown buttons get a row automatically), Left/Right
+    cycles the 12 actions, Accept opens the picker, Reset to defaults. Defaults from
+    the capture: left click/click/enter/return → Accept, del → Back, mute → Mute,
+    vol± → VolUp/VolDown, power/menu1-3/wheel → None. Persisted in
+    `settings.toml [input.airmouse] keys/labels` (toml++ inline tables, bare int
+    keys). While an app has focus only Home/Menu/Vol/Mute travel through; the
+    quick-panel overlay runs its own airmouse reader (MSC never reaches it via the
+    compositor). SDL mouse events (real mouse / composer-forwarded pointer) feed the
+    same engine path.
+- Tests: 36 → 42 cases (pointer hover/click/wheel, D-pad-beats-jitter, action
+  parsing, default keymap, MSC pairing/sweep, airmouse settings round-trip incl.
+  hand-written TOML). APK r4 provisioned to the box; live TV check pending.
 
 ### 2026-11-26 — session 8 (Geobook 240 N5030 online as the new box)
 

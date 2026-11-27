@@ -47,8 +47,15 @@ Repurposed **GEOMARK Geobook 240** 14" 2-in-1 laptop motherboard in a mini-PC en
 - `drm: Unknown revision 0x06` at boot is a harmless GLK message
 - Connectors: **HDMI-A-1** (in use), HDMI-A-2 (untested), DP-1 (eDP panel port — no panel)
 - **HDMI link is 1.4** (Gemini Lake SoC): 4K60 requires 4:2:0, 4:4:4 is 4K30 max, no HDR
-  metadata. The dummy plug's EDID (AOC28E850.HDR) advertises 3840x2160@60 native with
-  tmds=340 MHz + SCDC; the session outputs 4K60 into it fine.
+  metadata.
+- **Current panel: TOSHIBA TV, 52" (EDID TSB/48, "TOSHIBA-TV", made 2022-w20)** — the
+  user calls it "the 4K monitor". Verified with edid-decode 2026-11-26: preferred
+  1920x1080@60, **native 3840x2160@30** (HDMI VIC 1, 297 MHz TMDS), 4K also at 25/24 Hz
+  and 4096x2160@24; the TV lists 4K50/60 but only in a **YCbCr 4:2:0** block at 594 MHz
+  TMDS — unachievable (VSDB max TMDS = 300 MHz, i.e. HDMI 1.4). Deep colour 36/30-bit +
+  RGB 4:4:4, audio LPCM 2ch / DD 5.1 / DD+ / TrueHD, no HDR metadata, no VRR. The session
+  runs native 4K@30 (`WIDTH=native`). The old dummy plug (AOC28E850.HDR, 4K60 native)
+  was used during bring-up only.
 - Vulkan via ANV (`mesa-vulkan-intel`) — gamescope composites fine at 4K
 - **VAAPI: must use the `i965` driver** (profile `VA_DRIVER=i965` →
   `/etc/foyer/env.d/libva.conf`, written by make-image.sh / provision.sh). The `iHD`
@@ -79,8 +86,39 @@ Repurposed **GEOMARK Geobook 240** 14" 2-in-1 laptop motherboard in a mini-PC en
 - **HDMI:** motherboard port → TV (dummy plug during bring-up). Board exposes HDMI-A-1 + HDMI-A-2 in sysfs
 - **Power:** mains directly (no battery)
 - **USB bus 2 (xHCI 3.0):** PNY SATA dock (disk) + Realtek RTL8153 USB Ethernet (`eth0`)
-- **USB bus 1 (xHCI 2.0):** Realtek Bluetooth radio (`0bda:c821`) — **broken dongle, stuck in a USB reset loop** (`hci0: command 0xfc61 tx timeout`); unplug it
+- **USB bus 1 (xHCI 2.0):** Realtek Bluetooth radio (`0bda:c821`) — **broken dongle, stuck in a USB reset loop** (`hci0: command 0xfc61 tx timeout`); unplug it; **XING WEI 2.4G air mouse** (`4842:0001`)
 - No Wi-Fi/BT on the board itself (BT only via the dongle)
+
+## Input — XING WEI 2.4G air mouse (`4842:0001`)
+
+USB composite device, 4 HID interfaces (event7 kbd, event11 mouse, event12/13 event). 15
+physical buttons: d-pad (left/right/up/down), enter, menu 1/2/3, power, mute, del, click,
+return, vol down, vol up — plus left/right click and wheel. **None of the buttons are
+EV_KEY/BTN_*** — the firmware reports every button as **EV_MSC MSC_SCAN** with a 24-bit
+HID usage (`page<<16 | usage<<8`) and emits the code **twice per press** (press report,
+release report). The compositor never sees MSC_SCAN, so Foyer reads it itself
+(`foyer/src/input/airmouse.cpp`, match string `XING WEI`) and remaps it in
+Settings → Air mouse. Pointer motion is ordinary REL_X/REL_Y (wave) and **streams
+continuously at ~60 Hz with ±1 jitter even at rest** — the engine's hover logic rebases
+after D-pad focus changes and ignores moves under 6 px so the stream can't steal focus.
+
+Observed MSC codes (XING WEI unit, captured 2026-11-26):
+
+| MSC (hex) | HID meaning | Button (user-confirmed order) |
+|---|---|---|
+| `0x090001` | Button 1 | left click (physical) |
+| `0x010081` | Desktop Y | wheel (same code up & down) |
+| `0x070065` | System Power | power |
+| `0x07002A` | keyboard 0x2A (del) | click |
+| `0x0C00CF` | consumer 0xCF | del |
+| `0x0C0223` | consumer 0x223 | mute |
+| `0x0C0224` | consumer 0x224 | return |
+| `0x0C00EA` / `0x0C00E9` | consumer | vol down / vol up |
+| `0x0C0044` / `0x0C0045` / `0x0C0042` / `0x0C0043` | consumer | enter / menu 1 / menu 2 / menu 3 |
+
+The device also floods **EV_KEY code 0 (KEY_RESERVED) release** events on every HID
+report — ignore them. Right-click was never observed (possibly one of the consumer
+codes above; the remap page's live highlight identifies any button).
 
 ## Network
 
