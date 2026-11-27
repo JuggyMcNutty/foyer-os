@@ -2,7 +2,7 @@
 # Built from the foyer/ submodule of foyer-os (pinned commit).
 pkgname=foyer
 pkgver=3.0.0
-pkgrel=6
+pkgrel=7
 pkgdesc="Foyer: couch-first big-picture launcher for TVs"
 url="https://github.com/JuggyMcNutty/foyer"
 arch="x86_64 aarch64"

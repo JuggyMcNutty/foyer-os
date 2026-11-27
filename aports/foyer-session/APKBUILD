@@ -3,7 +3,7 @@
 # app wrappers, default config and the runtime dependency set.
 pkgname=foyer-session
 pkgver=3.0.0
-pkgrel=5
+pkgrel=6
 pkgdesc="foyer-os session: gamescope + PipeWire + Foyer on tty1, foyer-ctl, app wrappers"
 url="https://github.com/JuggyMcNutty/foyer-os"
 arch="noarch"
